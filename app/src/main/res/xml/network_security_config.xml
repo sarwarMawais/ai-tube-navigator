@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Only allow HTTPS connections for security -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Allow TfL API and weather API -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">api.tfl.gov.uk</domain>
+        <domain includeSubdomains="true">api.open-meteo.com</domain>
+        <domain includeSubdomains="true">maps.googleapis.com</domain>
+    </domain-config>
+</network-security-config>

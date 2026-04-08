@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">London Tube AI</string>
+    <string name="home">Home</string>
+    <string name="route">Route</string>
+    <string name="status">Status</string>
+    <string name="stations">Stations</string>
+    <string name="settings">Settings</string>
+    <string name="plan_journey">Plan Your Journey</string>
+    <string name="from">From</string>
+    <string name="to">To</string>
+    <string name="search_stations">Search stations</string>
+    <string name="refresh">Refresh</string>
+    <string name="good_service">Good Service</string>
+    <string name="disrupted">Disrupted</string>
+    <string name="live_status">Live Status</string>
+    <string name="ai_insights">AI Insights</string>
+    <string name="carriage_recommendation">AI Carriage Recommendation</string>
+    <string name="crowd_prediction">Crowd Prediction</string>
+    <string name="recent_journeys">Recent Journeys</string>
+    <string name="exits">Exits</string>
+    <string name="step_free">Step-free</string>
+    <string name="board_here">Board here</string>
+    <string name="zone">Zone %1$s</string>
+    <string name="line_status">Line Status</string>
+    <string name="all_lines">All Lines</string>
+</resources>

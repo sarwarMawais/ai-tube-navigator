@@ -1,0 +1,211 @@
+package com.londontubeai.navigator.data.model
+
+/**
+ * Mapping of app station IDs to TfL NapTan IDs.
+ * TfL API requires NapTan IDs (e.g. "940GZZLUOXC") for arrivals endpoints,
+ * but our app uses slug-based IDs (e.g. "oxford-circus").
+ */
+object NaptanIds {
+
+    fun forStation(stationId: String): String? = mapping[stationId]
+    fun stationIdForNaptan(naptanId: String): String? = reverseMapping[naptanId]
+
+    private val reverseMapping by lazy {
+        mapping.entries.associate { (stationId, naptan) -> naptan to stationId }
+    }
+
+    private val mapping = mapOf(
+        // Zone 1 Major Interchanges
+        "oxford-circus" to "940GZZLUOXC",
+        "kings-cross" to "940GZZLUKSX",
+        "bank" to "940GZZLUBNK",
+        "green-park" to "940GZZLUGPK",
+        "waterloo" to "940GZZLUWLO",
+        "victoria" to "940GZZLUVIC",
+        "london-bridge" to "940GZZLULNB",
+        "paddington" to "940GZZLUPAD",
+        "baker-street" to "940GZZLUBST",
+        "liverpool-street" to "940GZZLULVT",
+        "euston" to "940GZZLUEUS",
+        "bond-street" to "940GZZLUBND",
+        "westminster" to "940GZZLUWSM",
+        "embankment" to "940GZZLUEMB",
+        "piccadilly-circus" to "940GZZLUPCC",
+        "leicester-square" to "940GZZLULSQ",
+        "tottenham-court-road" to "940GZZLUTCR",
+        "charing-cross" to "940GZZLUCHX",
+        "moorgate" to "940GZZLUMGT",
+        "farringdon" to "940GZZLUFAR",
+
+        // Zone 1
+        "aldgate" to "940GZZLUALD",
+        "aldgate-east" to "940GZZLUADE",
+        "angel" to "940GZZLUAGL",
+        "barbican" to "940GZZLUBBN",
+        "blackfriars" to "940GZZLUBKF",
+        "borough" to "940GZZLUBOR",
+        "cannon-street" to "940GZZLUCST",
+        "chancery-lane" to "940GZZLUCHL",
+        "covent-garden" to "940GZZLUCGN",
+        "edgware-road" to "940GZZLUERC",
+        "edgware-road-bakerloo" to "940GZZLUERB",
+        "elephant-castle" to "940GZZLUEAC",
+        "euston-square" to "940GZZLUESQ",
+        "gloucester-road" to "940GZZLUGTR",
+        "goodge-street" to "940GZZLUGDG",
+        "great-portland-street" to "940GZZLUGPS",
+        "high-street-kensington" to "940GZZLUHSK",
+        "holborn" to "940GZZLUHBN",
+        "hyde-park-corner" to "940GZZLUHPC",
+        "kennington" to "940GZZLUKNG",
+        "knightsbridge" to "940GZZLUKBN",
+        "lambeth-north" to "940GZZLULBN",
+        "lancaster-gate" to "940GZZLULGT",
+        "mansion-house" to "940GZZLUMSH",
+        "marble-arch" to "940GZZLUMBA",
+        "marylebone" to "940GZZLUMYB",
+        "monument" to "940GZZLUMMT",
+        "mornington-crescent" to "940GZZLUMTC",
+        "old-street" to "940GZZLUOLD",
+        "oval" to "940GZZLUOVL",
+        "pimlico" to "940GZZLUPCO",
+        "queensway" to "940GZZLUQWY",
+        "regents-park" to "940GZZLURGP",
+        "russell-square" to "940GZZLURSQ",
+        "sloane-square" to "940GZZLUSSQ",
+        "south-kensington" to "940GZZLUSKS",
+        "southwark" to "940GZZLUSWK",
+        "st-james-park" to "940GZZLUSJP",
+        "st-pauls" to "940GZZLUSPU",
+        "temple" to "940GZZLUTML",
+        "tower-hill" to "940GZZLUTWR",
+        "vauxhall" to "940GZZLUVXL",
+        "warren-street" to "940GZZLUWRR",
+        "whitechapel" to "940GZZLUWPL",
+
+        // Zone 1-2
+        "bermondsey" to "940GZZLUBMY",
+        "bethnal-green" to "940GZZLUBTH",
+        "caledonian-road" to "940GZZLUCAL",
+        "camden-town" to "940GZZLUCTN",
+        "canada-water" to "940GZZLUCWR",
+        "chalk-farm" to "940GZZLUCKF",
+        "hammersmith" to "940GZZLUHSD",
+        "holland-park" to "940GZZLUHPK",
+        "kentish-town" to "940GZZLUKSH",
+        "ladbroke-grove" to "940GZZLULRD",
+        "notting-hill-gate" to "940GZZLUNHG",
+        "shepherds-bush" to "940GZZLUSBC",
+        "shepherds-bush-market" to "940GZZLUSBM",
+        "stockwell" to "940GZZLUSKW",
+        "westbourne-park" to "940GZZLUWBN",
+        "white-city" to "940GZZLUWCY",
+        "wood-lane" to "940GZZLUWLA",
+
+        // Zone 2
+        "archway" to "940GZZLUACY",
+        "arsenal" to "940GZZLUASL",
+        "balham" to "940GZZLUBLM",
+        "barons-court" to "940GZZLUBSC",
+        "bayswater" to "940GZZLUBWT",
+        "brixton" to "940GZZLUBXN",
+        "canning-town" to "940GZZLUCAN",
+        "canary-wharf" to "940GZZLUCYF",
+        "clapham-common" to "940GZZLUCPC",
+        "clapham-north" to "940GZZLUCPN",
+        "clapham-south" to "940GZZLUCPS",
+        "earls-court" to "940GZZLUECT",
+        "finchley-road" to "940GZZLUFYR",
+        "finsbury-park" to "940GZZLUFPK",
+        "golders-green" to "940GZZLUGGH",
+        "hampstead" to "940GZZLUHTD",
+        "highbury-islington" to "940GZZLUHAI",
+        "holloway-road" to "940GZZLUHWY",
+        "mile-end" to "940GZZLUMED",
+        "north-greenwich" to "940GZZLUNGW",
+        "st-johns-wood" to "940GZZLUSJW",
+        "swiss-cottage" to "940GZZLUSWC",
+        "tufnell-park" to "940GZZLUTFP",
+        "west-ham" to "940GZZLUWEH",
+
+        // Zone 2-3
+        "acton-town" to "940GZZLUACT",
+        "blackhorse-road" to "940GZZLUBLR",
+        "east-finchley" to "940GZZLUEFN",
+        "highgate" to "940GZZLUHGT",
+        "leyton" to "940GZZLULYN",
+        "leytonstone" to "940GZZLULYS",
+        "north-acton" to "940GZZLUNAN",
+        "seven-sisters" to "940GZZLUSEV",
+        "tooting-bec" to "940GZZLUTBC",
+        "tooting-broadway" to "940GZZLUTBY",
+        "tottenham-hale" to "940GZZLUTHL",
+        "walthamstow-central" to "940GZZLUWWL",
+
+        // Zone 3+
+        "barking" to "940GZZLUBKG",
+        "canons-park" to "940GZZLUCPK",
+        "colliers-wood" to "940GZZLUCSD",
+        "ealing-broadway" to "940GZZLUEBY",
+        "edgware" to "940GZZLUEGW",
+        "finchley-central" to "940GZZLUFYC",
+        "harrow-on-the-hill" to "940GZZLUHOH",
+        "high-barnet" to "940GZZLUHBT",
+        "morden" to "940GZZLUMDN",
+        "south-wimbledon" to "940GZZLUSWN",
+        "stanmore" to "940GZZLUSME",
+        "stratford" to "940GZZLUSFD",
+        "wembley-park" to "940GZZLUWPP",
+
+        // Zone 4+
+        "amersham" to "940GZZLUAMS",
+        "chesham" to "940GZZLUCHM",
+        "cockfosters" to "940GZZLUCKS",
+        "uxbridge" to "940GZZLUUXB",
+
+        // Bakerloo northern (Paddington → Harrow & Wealdstone)
+        "warwick-avenue" to "940GZZLUWKA",
+        "maida-vale" to "940GZZLUMVL",
+        "kilburn-park" to "940GZZLUKPK",
+        "queens-park" to "940GZZLUQPS",
+        "kensal-green" to "940GZZLUKSL",
+        "harlesden" to "940GZZLUHSN",
+        "stonebridge-park" to "940GZZLUSBP",
+        "wembley-central" to "940GZZLUWMC",
+        "north-wembley" to "940GZZLUNWY",
+        "south-kenton" to "940GZZLUSKT",
+        "kenton" to "940GZZLUKTON",
+        "harrow-wealdstone" to "940GZZLUHAW",
+
+        // Piccadilly outer (Finsbury Park → Cockfosters)
+        "manor-house" to "940GZZLUMNR",
+        "turnpike-lane" to "940GZZLUTPL",
+        "wood-green" to "940GZZLUWDG",
+        "bounds-green" to "940GZZLUBDG",
+        "arnos-grove" to "940GZZLUARG",
+        "southgate" to "940GZZLUSGAT",
+        "oakwood" to "940GZZLUOKW",
+
+        // Metropolitan intermediate (Harrow → Amersham)
+        "north-harrow" to "940GZZLUNHR",
+        "pinner" to "940GZZLUPNR",
+        "northwood-hills" to "940GZZLUNWH",
+        "northwood" to "940GZZLUNWD",
+        "chorleywood" to "940GZZLUCYW",
+        "chalfont-latimer" to "940GZZLUCLT",
+
+        // Metropolitan/Piccadilly Uxbridge branch
+        "rayners-lane" to "940GZZLURYL",
+        "eastcote" to "940GZZLUESC",
+        "ruislip-manor" to "940GZZLURSM",
+        "ruislip" to "940GZZLURSP",
+        "ickenham" to "940GZZLUICK",
+        "hillingdon" to "940GZZLUHLD",
+
+        // Elizabeth line / special
+        "abbey-wood" to "910GABYWOD",
+        "woolwich" to "910GWLWICH",
+        "heathrow-t123" to "940GZZLUHRC",
+        "heathrow-t5" to "940GZZLUHR5",
+    )
+}
