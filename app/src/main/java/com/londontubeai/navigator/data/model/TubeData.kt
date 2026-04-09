@@ -350,16 +350,16 @@ object TubeData {
             else -> 3.2f
         }
         return listOf(
-            StationReview("r1-$stationId", stationId, "Alex M.", baseRating + 0.3f,
+            StationReview("r1-$stationId", stationId, "Alex M.", (baseRating + 0.3f).coerceIn(1.0f, 5.0f),
                 "Clean and well-maintained. Good signage for interchanges.", helpful = 12,
                 tags = listOf("Clean", "Well signed")),
-            StationReview("r2-$stationId", stationId, "Sarah K.", baseRating,
+            StationReview("r2-$stationId", stationId, "Sarah K.", baseRating.coerceIn(1.0f, 5.0f),
                 "Gets very busy during rush hour but manageable. WiFi works well.", helpful = 8,
                 tags = listOf("Busy peak", "Good WiFi")),
-            StationReview("r3-$stationId", stationId, "James W.", baseRating - 0.2f,
+            StationReview("r3-$stationId", stationId, "James W.", (baseRating - 0.2f).coerceIn(1.0f, 5.0f),
                 if (station.hasStepFreeAccess) "Great step-free access, lifts always working." else "Could use better accessibility options.",
                 helpful = 15, tags = if (station.hasStepFreeAccess) listOf("Accessible") else listOf("Needs improvement")),
-            StationReview("r4-$stationId", stationId, "Priya R.", baseRating + 0.1f,
+            StationReview("r4-$stationId", stationId, "Priya R.", (baseRating + 0.1f).coerceIn(1.0f, 5.0f),
                 "Convenient location with good bus connections nearby.", helpful = 6,
                 tags = listOf("Good connections")),
         )
@@ -380,7 +380,8 @@ object TubeData {
 
         // Station-specific insights
         if (station.annualPassengers > 50) {
-            insights.add(StationInsight("Busy Station", "${station.annualPassengers.toInt()}M passengers/year — one of London's busiest. Allow extra time.", "trending_up", StationInsightType.INFO))
+            val passengerText = if (station.annualPassengers >= 100) "${station.annualPassengers.toInt()}M" else "${String.format("%.1f", station.annualPassengers)}M"
+            insights.add(StationInsight("Busy Station", "$passengerText passengers/year — one of London's busiest. Allow extra time.", "trending_up", StationInsightType.INFO))
         }
         if (station.lineIds.size >= 3) {
             insights.add(StationInsight("Major Interchange", "${station.lineIds.size} lines converge here. Interchange takes ~${station.interchangeTimeMinutes} min. Follow colour-coded signs.", "swap_horiz", StationInsightType.TIP))

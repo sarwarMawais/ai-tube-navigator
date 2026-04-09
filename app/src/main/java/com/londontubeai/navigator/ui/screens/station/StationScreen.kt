@@ -784,7 +784,7 @@ fun StationDetailScreen(
 
         if (station == null) return
 
-        LazyColumn(contentPadding = PaddingValues(bottom = Spacing.lg)) {
+        LazyColumn(contentPadding = PaddingValues(bottom = 100.dp)) {
 
             // ── 1. Station Info Header ───────────────────────
             item { DetailHeaderCard(station = station) }
@@ -907,9 +907,36 @@ fun StationDetailScreen(
                 item { CommunityTipsSection(state.communityTips) }
             }
 
-            // ── 15. Station Reviews ──────────────────────────
+            // ── 15. Station Reviews ──────────────────────────────
             if (state.stationReviews.isNotEmpty()) {
-                item { DetailSectionTitle("Reviews", Icons.Filled.Star) }
+                val avgReviewRating = state.stationReviews.map { it.rating }.average().toFloat()
+                item {
+                    Row(
+                        Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Star, null, Modifier.size(20.dp), tint = TubePrimary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Reviews", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFFFFC107).copy(alpha = 0.15f)) {
+                            Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Star, null, Modifier.size(13.dp), tint = Color(0xFFFFC107))
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    String.format("%.1f", avgReviewRating),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFE65100),
+                                )
+                                Text(
+                                    " / 5",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
                 item { StationReviewsSection(state.stationReviews) }
             }
         }
@@ -921,33 +948,103 @@ fun StationDetailScreen(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DetailHeaderCard(station: Station) {
+    val passengerLabel = when {
+        station.annualPassengers >= 100 -> "${station.annualPassengers.toInt()}M/yr"
+        station.annualPassengers > 0 -> "${String.format("%.1f", station.annualPassengers)}M/yr"
+        else -> null
+    }
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.xl, vertical = Spacing.sm),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = TubePrimary.copy(alpha = 0.06f)),
     ) {
         Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Place, null, Modifier.size(20.dp), tint = TubePrimary)
-                Spacer(Modifier.width(8.dp))
-                Text("Zone ${station.zone}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            // Zone + badges row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = TubePrimary.copy(alpha = 0.12f),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Place, null, Modifier.size(13.dp), tint = TubePrimary)
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "Zone ${station.zone}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TubePrimary,
+                        )
+                    }
+                }
                 if (station.hasStepFreeAccess) {
-                    Spacer(Modifier.width(12.dp))
-                    Icon(Icons.AutoMirrored.Filled.AccessibleForward, "Step-free", Modifier.size(18.dp), tint = StatusGood)
-                    Spacer(Modifier.width(4.dp))
-                    Text("Step-free", style = MaterialTheme.typography.labelSmall, color = StatusGood, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.width(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = StatusGood.copy(alpha = 0.1f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.AccessibleForward, null, Modifier.size(13.dp), tint = StatusGood)
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "Step-free",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = StatusGood,
+                            )
+                        }
+                    }
+                }
+                if (passengerLabel != null) {
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "~$passengerLabel riders",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
             Spacer(Modifier.height(12.dp))
+            // Line chips
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 station.lineIds.forEach { lineId ->
                     val line = TubeData.getLineById(lineId)
                     if (line != null) TubeLineChip(lineName = line.name, lineColor = line.color)
                 }
             }
-            if (station.annualPassengers > 0) {
+            // Facilities quick row
+            if (station.facilities.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
-                Text("~${station.annualPassengers}M passengers/year", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    station.facilities.take(4).forEach { f ->
+                        Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)) {
+                            Text(
+                                f.label,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (station.facilities.size > 4) {
+                        Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)) {
+                            Text(
+                                "+${station.facilities.size - 4} more",
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1306,7 +1403,12 @@ private fun StationSnapshotCard(station: Station) {
                 SnapshotPill("Lines", "${station.lineIds.size}")
                 SnapshotPill("Interchange", "${station.interchangeTimeMinutes.coerceAtLeast(1)} min")
                 SnapshotPill("Carriages", "${station.totalCarriages}")
-                SnapshotPill("Traffic", if (station.annualPassengers > 0) "${station.annualPassengers.toInt()}M/yr" else "Local")
+                val passengerStr = when {
+                    station.annualPassengers >= 100 -> "${station.annualPassengers.toInt()}M/yr"
+                    station.annualPassengers > 0 -> "${String.format("%.1f", station.annualPassengers)}M/yr"
+                    else -> "Local stop"
+                }
+                SnapshotPill("Traffic", passengerStr)
                 if (station.wifiAvailable) SnapshotPill("WiFi", "Yes")
                 if (station.toiletsAvailable) SnapshotPill("Toilets", "Yes")
             }

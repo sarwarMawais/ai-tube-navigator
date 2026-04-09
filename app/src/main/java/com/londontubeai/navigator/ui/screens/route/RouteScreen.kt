@@ -730,7 +730,7 @@ private fun GMapsSearchHeader(
             AnimatedVisibility(visible = uiState.isSearchingFrom && uiState.fromSuggestions.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                 Column {
                     uiState.fromSuggestions.forEach { s ->
-                        StationSuggestionItem(stationName = s.name, zone = s.zone, lines = s.lineIds, onClick = { onFromSelect(s) })
+                        StationSuggestionItem(stationName = s.name, zone = s.zone, lines = s.lineIds, isPlace = s.id.startsWith("place:"), onClick = { onFromSelect(s) })
                     }
                 }
             }
@@ -738,7 +738,7 @@ private fun GMapsSearchHeader(
             AnimatedVisibility(visible = uiState.isSearchingTo && uiState.toSuggestions.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                 Column {
                     uiState.toSuggestions.forEach { s ->
-                        StationSuggestionItem(stationName = s.name, zone = s.zone, lines = s.lineIds, onClick = { onToSelect(s) })
+                        StationSuggestionItem(stationName = s.name, zone = s.zone, lines = s.lineIds, isPlace = s.id.startsWith("place:"), onClick = { onToSelect(s) })
                     }
                 }
             }
@@ -877,10 +877,13 @@ private fun RouteOptionCard(
     onSelect: () -> Unit,
 ) {
     val route = option.route
-    val cal = remember(route.totalDurationMinutes) {
+    val nowCal = remember { Calendar.getInstance() }
+    val arrivalCal = remember(route.totalDurationMinutes) {
         Calendar.getInstance().apply { add(Calendar.MINUTE, route.totalDurationMinutes) }
     }
-    val arrivalTime = String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+    val departureTime = String.format("%02d:%02d", nowCal.get(Calendar.HOUR_OF_DAY), nowCal.get(Calendar.MINUTE))
+    val arrivalTime = String.format("%02d:%02d", arrivalCal.get(Calendar.HOUR_OF_DAY), arrivalCal.get(Calendar.MINUTE))
+    val durationLabel = formatDuration(route.totalDurationMinutes)
     val firstTubeLeg = route.legs.firstOrNull { it.mode == TransportMode.TUBE }
     val allTubeLegs = route.legs.filter { it.mode == TransportMode.TUBE }
 
@@ -932,360 +935,66 @@ private fun RouteOptionCard(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // ── Route tape ─────────────────────────────────────
-        RouteTape(route = route)
+        // ── Time range row (Google Maps style) ──────────────
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "$departureTime – $arrivalTime",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                modifier = Modifier.weight(1f),
+            )
+            if (isSelected && route.aiTimePredictionMinutes > 0 && route.aiTimePredictionMinutes != route.totalDurationMinutes) {
+                Surface(shape = RoundedCornerShape(8.dp), color = StatusMinor.copy(alpha = 0.1f)) {
+                    Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Timer, null, tint = StatusMinor, modifier = Modifier.size(11.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text("AI: ${route.aiTimePredictionMinutes}m", style = MaterialTheme.typography.labelSmall, color = StatusMinor, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+            ) {
+                Text(
+                    durationLabel,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // ── Time + Arrival ──────────────────────────────────
+        // ── Transit step icons row (Google Maps style) ──────
+        TransitStepsRow(legs = route.legs)
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // ── Compact info row ──────────────────────────────────
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    "${route.totalDurationMinutes}",
-                    fontSize = if (isSelected) 36.sp else 28.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    lineHeight = if (isSelected) 36.sp else 28.sp,
-                )
-                Text(
-                    " min",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.65f) else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 3.dp),
-                )
-                if (isSelected && route.aiTimePredictionMinutes > 0 && route.aiTimePredictionMinutes != route.totalDurationMinutes) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Surface(shape = RoundedCornerShape(8.dp), color = StatusMinor.copy(alpha = 0.1f)) {
-                        Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Timer, null, tint = StatusMinor, modifier = Modifier.size(11.dp))
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Text("AI: ${route.aiTimePredictionMinutes}m", style = MaterialTheme.typography.labelSmall, color = StatusMinor, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("Arrives", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(arrivalTime, style = if (isSelected) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall, fontWeight = FontWeight.ExtraBold)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // ── Stats row ───────────────────────────────────────
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(0.dp)) {
             val changes = route.totalInterchanges
+            val infoItems = buildList {
+                add(if (changes == 0) "Direct" else "$changes change${if (changes != 1) "s" else ""}")
+                if (route.totalStops > 0) add("${route.totalStops} stops")
+                if (route.totalWalkingMinutes > 0) add("${route.totalWalkingMinutes}m walk")
+                if (route.co2SavedGrams > 0) add("${route.co2SavedGrams}g CO₂ saved")
+            }
             Text(
-                if (changes == 0) "Direct" else "$changes change${if (changes != 1) "s" else ""}",
-                style = MaterialTheme.typography.bodySmall,
+                infoItems.joinToString("  ·  "),
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (route.totalWalkingMinutes > 0) {
-                StatDivider()
-                Text("${route.totalWalkingMinutes}m walk", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            // Line pills
-            allTubeLegs.take(3).forEach { leg ->
-                StatDivider()
-                Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(leg.line.color))
-                Spacer(modifier = Modifier.width(3.dp))
-                Text(
-                    leg.line.name,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = leg.line.color,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-
-        // ── Platform + Next train (live) ────────────────────
-        if (firstTubeLeg != null) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                // Platform badge
-                if (firstTubeLeg.platformNumber.isNotEmpty()) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = firstTubeLeg.line.color.copy(alpha = 0.12f),
-                    ) {
-                        Row(modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Train, null, tint = firstTubeLeg.line.color, modifier = Modifier.size(10.dp))
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                firstTubeLeg.platformNumber,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = firstTubeLeg.line.color,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp,
-                            )
-                        }
-                    }
-                }
-                // Next train badge
-                if (firstTubeLeg.nextDepartureMinutes > 0) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = StatusGood.copy(alpha = 0.1f),
-                    ) {
-                        Row(modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(StatusGood))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                "Next in ${firstTubeLeg.nextDepartureMinutes} min",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = StatusGood,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp,
-                            )
-                        }
-                    }
-                } else {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    ) {
-                        Row(modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Schedule, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(10.dp))
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                "Check live board",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 10.sp,
-                            )
-                        }
-                    }
-                }
-                // Direction badge
-                if (isSelected && firstTubeLeg.direction.isNotEmpty()) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    ) {
-                        Text(
-                            "→ ${firstTubeLeg.direction}",
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-        }
-
-        // ── Service info (first/last/frequency) — selected only ──
-        if (isSelected) {
-            val serviceLine = firstTubeLeg?.line
-            if (serviceLine != null && (serviceLine.firstTrain.isNotEmpty() || serviceLine.peakFrequencyMinutes > 0)) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (serviceLine.firstTrain.isNotEmpty()) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(serviceLine.firstTrain, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                Text("First", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(serviceLine.lastTrain, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                Text("Last", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                            }
-                        }
-                        if (serviceLine.peakFrequencyMinutes > 0) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("${serviceLine.peakFrequencyMinutes}m", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                Text("Peak gap", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                            }
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("${route.totalStops}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                            Text("Stops", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("${route.co2SavedGrams}g", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                            Text("CO₂ saved", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                        }
-                    }
-                }
-            }
-
-            // ── Inline Step-by-Step ─────────────────────────────
-            if (route.legs.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(14.dp))
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)))
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier.size(26.dp).clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Filled.Route, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        "Step-by-Step",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        "${route.legs.size} leg${if (route.legs.size != 1) "s" else ""}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-                route.legs.forEach { leg -> SimplifiedLegRow(leg) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RouteHeroCard(
-    uiState: RouteUiState,
-    route: com.londontubeai.navigator.data.model.JourneyRoute?,
-    onNavigateToMap: (String, String) -> Unit,
-) {
-    if (route == null) return
-    val cal = remember(route.totalDurationMinutes) {
-        Calendar.getInstance().apply { add(Calendar.MINUTE, route.totalDurationMinutes) }
-    }
-    val arrivalTime = String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
-    val firstTubeLeg = route.legs.firstOrNull { it.mode == TransportMode.TUBE }
-    val serviceLine = firstTubeLeg?.line
-
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 6.dp,
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
-            // Time + Arrival
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = "${route.totalDurationMinutes}",
-                        fontSize = 42.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.primary,
-                        lineHeight = 42.sp,
-                    )
-                    Text(
-                        text = " min",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f),
-                        modifier = Modifier.padding(bottom = 5.dp),
-                    )
-                    if (route.aiTimePredictionMinutes != route.totalDurationMinutes) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(shape = RoundedCornerShape(8.dp), color = StatusMinor.copy(alpha = 0.1f)) {
-                            Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Timer, null, tint = StatusMinor, modifier = Modifier.size(11.dp))
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text("AI: ${route.aiTimePredictionMinutes}m", style = MaterialTheme.typography.labelSmall, color = StatusMinor, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("Arrives", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(arrivalTime, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
-                }
-            }
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Route Tape
-            RouteTape(route = route)
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Stats row
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                RouteStat(icon = Icons.Filled.SyncAlt, text = "${route.totalInterchanges} change${if (route.totalInterchanges != 1) "s" else ""}")
-                StatDivider()
-                RouteStat(icon = Icons.Filled.Route, text = "${route.totalStops} stops")
-                if (route.totalWalkingMinutes > 0) {
-                    StatDivider()
-                    RouteStat(icon = Icons.AutoMirrored.Filled.DirectionsWalk, text = "${route.totalWalkingMinutes}m walk")
-                }
-                StatDivider()
-                RouteStat(icon = Icons.Filled.Co2, text = "${route.co2SavedGrams}g CO₂")
-            }
-
-            // Service info row
-            if (serviceLine != null || (firstTubeLeg != null && firstTubeLeg.nextDepartureMinutes > 0)) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                        if (firstTubeLeg != null && firstTubeLeg.nextDepartureMinutes > 0) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Filled.Schedule, null, tint = StatusGood, modifier = Modifier.size(11.dp))
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text("${firstTubeLeg.nextDepartureMinutes} min", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = StatusGood)
-                                }
-                                Text("Next train", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                            }
-                        }
-                        if (serviceLine != null) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(serviceLine.firstTrain, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                Text("First", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(serviceLine.lastTrain, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                Text("Last", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("${serviceLine.peakFrequencyMinutes}m", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                Text("Peak gap", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // View on Map
-            Surface(
-                modifier = Modifier.fillMaxWidth().clickable { onNavigateToMap(route.fromStation.id, route.toStation.id) },
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.primary,
-            ) {
-                Row(modifier = Modifier.padding(vertical = 13.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Place, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("View on Map", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.White)
-                }
-            }
         }
     }
 }
@@ -1634,7 +1343,7 @@ private fun RouteStatPill(icon: ImageVector, value: String, label: String, modif
 }
 
 @Composable
-private fun StationSuggestionItem(stationName: String, zone: String, lines: List<String> = emptyList(), onClick: () -> Unit) {
+private fun StationSuggestionItem(stationName: String, zone: String, lines: List<String> = emptyList(), isPlace: Boolean = false, onClick: () -> Unit) {
     var isPressed by remember { mutableStateOf(false) }
     
     Surface(
@@ -1669,9 +1378,9 @@ private fun StationSuggestionItem(stationName: String, zone: String, lines: List
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.Filled.DirectionsSubway, 
+                    if (isPlace) Icons.Filled.Place else Icons.Filled.DirectionsSubway,
                     contentDescription = null, 
-                    tint = MaterialTheme.colorScheme.primary, 
+                    tint = if (isPlace) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary, 
                     modifier = Modifier.size(18.dp)
                 )
             }
@@ -1683,7 +1392,15 @@ private fun StationSuggestionItem(stationName: String, zone: String, lines: List
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                if (lines.isNotEmpty()) {
+                if (isPlace) {
+                    Text(
+                        text = if (lines.isNotEmpty()) lines.take(2).joinToString(" · ") { it.replaceFirstChar { c -> c.uppercase() } } else "Bus / Rail stop",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF4CAF50),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else if (lines.isNotEmpty()) {
                     Text(
                         text = lines.take(3).joinToString(" · ") { it.replaceFirstChar { c -> c.uppercase() } },
                         style = MaterialTheme.typography.labelSmall,
@@ -1693,18 +1410,20 @@ private fun StationSuggestionItem(stationName: String, zone: String, lines: List
                     )
                 }
             }
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
-            ) {
-                Text(
-                    text = "Zone $zone",
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold,
-                )
+            if (zone.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (isPlace) Color(0xFF4CAF50).copy(alpha = 0.1f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, if (isPlace) Color(0xFF4CAF50).copy(alpha = 0.3f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                ) {
+                    Text(
+                        text = if (isPlace) "Place" else "Zone $zone",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isPlace) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
     }
@@ -2223,6 +1942,114 @@ private fun NearbyBusesSection(
                     "No live buses found within 400m",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+private fun formatDuration(minutes: Int): String {
+    val h = minutes / 60
+    val m = minutes % 60
+    return when {
+        h == 0 -> "$m min"
+        m == 0 -> "$h hr"
+        else -> "$h hr $m min"
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TransitStepsRow(legs: List<com.londontubeai.navigator.data.model.JourneyLeg>) {
+    val busRed = Color(0xFFE32017)
+    val walkGrey = Color(0xFF78909C)
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        legs.forEachIndexed { index, leg ->
+            when (leg.mode) {
+                com.londontubeai.navigator.data.model.TransportMode.WALKING -> {
+                    if (leg.durationMinutes > 0) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .background(walkGrey.copy(alpha = 0.10f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 7.dp, vertical = 4.dp),
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.DirectionsWalk,
+                                contentDescription = null,
+                                tint = walkGrey,
+                                modifier = Modifier.size(13.dp),
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                "${leg.durationMinutes}m",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = walkGrey,
+                            )
+                        }
+                    }
+                }
+                com.londontubeai.navigator.data.model.TransportMode.BUS -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .background(busRed, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 7.dp, vertical = 4.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.DirectionsBus,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(11.dp),
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            leg.busRouteNumber.ifBlank { leg.line.name.take(4) },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                        )
+                    }
+                }
+                com.londontubeai.navigator.data.model.TransportMode.TUBE -> {
+                    val isLight = leg.line.color == com.londontubeai.navigator.ui.theme.TubeLineColors.Circle ||
+                        leg.line.color == com.londontubeai.navigator.ui.theme.TubeLineColors.HammersmithCity ||
+                        leg.line.color == com.londontubeai.navigator.ui.theme.TubeLineColors.WaterlooCity
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .background(leg.line.color, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 7.dp, vertical = 4.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Train,
+                            contentDescription = null,
+                            tint = if (isLight) Color.Black else Color.White,
+                            modifier = Modifier.size(11.dp),
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            leg.line.name.split(" ").take(2).joinToString(" "),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (isLight) Color.Black else Color.White,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            // Arrow separator between steps
+            if (index < legs.size - 1) {
+                Text(
+                    "›",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.align(Alignment.CenterVertically),
                 )
             }
         }

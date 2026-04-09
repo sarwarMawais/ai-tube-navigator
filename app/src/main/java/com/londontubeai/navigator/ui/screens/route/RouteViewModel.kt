@@ -233,7 +233,7 @@ class RouteViewModel @Inject constructor(
         if (query.length >= 2) {
             fromSearchJob = viewModelScope.launch {
                 delay(SEARCH_DEBOUNCE_MS)
-                val suggestions = TubeData.searchStations(query).take(6)
+                val suggestions = repository.searchPlaces(query).getOrElse { TubeData.searchStations(query) }.take(8)
                 _uiState.value = _uiState.value.copy(
                     fromSuggestions = suggestions,
                 )
@@ -262,7 +262,7 @@ class RouteViewModel @Inject constructor(
         if (query.length >= 2) {
             toSearchJob = viewModelScope.launch {
                 delay(SEARCH_DEBOUNCE_MS)
-                val suggestions = TubeData.searchStations(query).take(6)
+                val suggestions = repository.searchPlaces(query).getOrElse { TubeData.searchStations(query) }.take(8)
                 _uiState.value = _uiState.value.copy(
                     toSuggestions = suggestions,
                 )
@@ -312,11 +312,31 @@ class RouteViewModel @Inject constructor(
         _uiState.value = current.copy(isSwapping = true)
         viewModelScope.launch {
             delay(150) // Brief animation delay
+
+            // If "from" was "My Location" (null station + GPS coords), create a synthetic
+            // place station so it can become a valid destination after swap.
+            val effectiveFrom = current.fromStation
+                ?: if (current.fromIsAutoLocation && current.userLat != null && current.userLng != null) {
+                    Station(
+                        id = "place:my-location",
+                        name = current.nearestStationName ?: "My Location",
+                        lineIds = emptyList(),
+                        zone = "",
+                        latitude = current.userLat,
+                        longitude = current.userLng,
+                    )
+                } else null
+
             _uiState.value = _uiState.value.copy(
                 fromStation = current.toStation,
-                toStation = current.fromStation,
+                toStation = effectiveFrom,
                 fromQuery = current.toQuery,
-                toQuery = current.fromQuery,
+                toQuery = effectiveFrom?.name ?: current.fromQuery,
+                fromSuggestions = emptyList(),
+                toSuggestions = emptyList(),
+                isSearchingFrom = false,
+                isSearchingTo = false,
+                fromIsAutoLocation = false,
                 routeCalculated = false,
                 isSwapping = false,
             )
@@ -464,44 +484,84 @@ class RouteViewModel @Inject constructor(
             val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
             val selectedCrowdDayType = _uiState.value.selectedCrowdDayType
 
-            val variants = listOf(
-                RoutePreference.FASTEST to "Fastest",
-                RoutePreference.FEWEST_CHANGES to "Fewer changes",
-                RoutePreference.LEAST_WALKING to "Less walking",
-            )
+            val toIsPlace = to.id.startsWith("place:")
 
-            val fetched = variants.map { (pref, label) ->
-                async {
-                    val route = if (useCoords) {
-                        // Pass raw GPS coordinates to TfL — it handles walk+bus+tube automatically
-                        repository.fetchJourneyRouteFromTfl(
-                            fromStationId = "my-location",
-                            toStationId = to.id,
-                            preference = pref.name,
-                            fromLat = lat,
-                            fromLng = lng,
-                        ).getOrNull()
-                        // Local fallback: walk to nearest station + tube
-                            ?: buildLocalRouteWithWalking(lat!!, lng!!, to, pref.name)
-                    } else {
-                        repository.fetchJourneyRouteFromTfl(from!!.id, to.id, pref.name)
-                            .getOrNull()
-                            ?: repository.findRoute(from.id, to.id, pref.name)
-                    }
-                    route?.let {
-                        RouteOption(
-                            label = label,
-                            description = buildOptionDescription(it),
-                            route = it,
-                            isRecommended = pref == RoutePreference.FASTEST,
-                        )
-                    }
+            // Fetch multiple journeys from TfL in parallel:
+            // 1) All journeys from "leasttime" (TfL returns 3-5 options)
+            // 2) Best journey from "leastinterchange" for variety
+            val allRoutes = mutableListOf<JourneyRoute>()
+
+            val tflFastest = async {
+                if (useCoords) {
+                    repository.fetchAllJourneyRoutesFromTfl(
+                        fromStationId = "my-location", toStationId = to.id, preference = "FASTEST",
+                        fromLat = lat, fromLng = lng,
+                        toLat = if (toIsPlace) to.latitude else null,
+                        toLng = if (toIsPlace) to.longitude else null,
+                        toDisplayName = if (toIsPlace) to.name else null,
+                    ).getOrDefault(emptyList())
+                } else {
+                    repository.fetchAllJourneyRoutesFromTfl(
+                        fromStationId = from!!.id, toStationId = to.id, preference = "FASTEST",
+                        toLat = if (toIsPlace) to.latitude else null,
+                        toLng = if (toIsPlace) to.longitude else null,
+                        toDisplayName = if (toIsPlace) to.name else null,
+                    ).getOrDefault(emptyList())
                 }
-            }.awaitAll().filterNotNull()
+            }
+            val tflFewest = async {
+                if (useCoords) {
+                    repository.fetchJourneyRouteFromTfl(
+                        fromStationId = "my-location", toStationId = to.id, preference = "FEWEST_CHANGES",
+                        fromLat = lat, fromLng = lng,
+                        toLat = if (toIsPlace) to.latitude else null,
+                        toLng = if (toIsPlace) to.longitude else null,
+                        toDisplayName = if (toIsPlace) to.name else null,
+                    ).getOrNull()
+                } else {
+                    repository.fetchJourneyRouteFromTfl(
+                        fromStationId = from!!.id, toStationId = to.id, preference = "FEWEST_CHANGES",
+                        toLat = if (toIsPlace) to.latitude else null,
+                        toLng = if (toIsPlace) to.longitude else null,
+                        toDisplayName = if (toIsPlace) to.name else null,
+                    ).getOrNull()
+                }
+            }
 
-            val options = fetched
-                .distinctBy { it.route.totalDurationMinutes }
-                .sortedBy { it.route.totalDurationMinutes }
+            allRoutes.addAll(tflFastest.await())
+            tflFewest.await()?.let { allRoutes.add(it) }
+
+            // Fallback to local Dijkstra if TfL returned nothing
+            if (allRoutes.isEmpty()) {
+                val fallback = if (useCoords) {
+                    buildLocalRouteWithWalking(lat!!, lng!!, to, "FASTEST")
+                } else if (!toIsPlace) {
+                    repository.findRoute(from!!.id, to.id, "FASTEST")
+                } else null
+                fallback?.let { allRoutes.add(it) }
+            }
+
+            // Deduplicate by duration + interchanges, label them, sort by time
+            val uniqueRoutes = allRoutes
+                .distinctBy { "${it.totalDurationMinutes}-${it.totalInterchanges}-${it.legs.size}" }
+                .sortedBy { it.totalDurationMinutes }
+                .take(5)
+
+            val options = uniqueRoutes.mapIndexed { idx, route ->
+                val label = when {
+                    idx == 0 -> "Fastest"
+                    route.totalInterchanges == 0 -> "Direct"
+                    route.totalInterchanges < (uniqueRoutes.firstOrNull()?.totalInterchanges ?: 99) -> "Fewer changes"
+                    route.totalWalkingMinutes < (uniqueRoutes.firstOrNull()?.totalWalkingMinutes ?: 99) -> "Less walking"
+                    else -> "Option ${idx + 1}"
+                }
+                RouteOption(
+                    label = label,
+                    description = buildOptionDescription(route),
+                    route = route,
+                    isRecommended = idx == 0,
+                )
+            }
 
             val crowdStationId = from?.id ?: to.id
             if (options.isNotEmpty()) {

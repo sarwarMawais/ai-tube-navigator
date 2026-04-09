@@ -204,56 +204,126 @@ class TubeRepository @Inject constructor(
     suspend fun saveUserPreferences(prefs: UserPreferencesEntity) =
         dao.saveUserPreferences(prefs)
 
+    suspend fun searchPlaces(query: String): Result<List<Station>> = runCatching {
+        val tflResults = try {
+            api.searchStopPoints(query).matches.orEmpty()
+        } catch (e: Exception) {
+            emptyList()
+        }
+        val tubeMatches = TubeData.searchStations(query)
+        val tubeNamesLower = tubeMatches.map { it.name.lowercase() }.toSet()
+        val extra = tflResults.mapNotNull { match ->
+            val lat = match.lat ?: return@mapNotNull null
+            val lon = match.lon ?: return@mapNotNull null
+            if (match.name.lowercase() in tubeNamesLower) return@mapNotNull null
+            Station(
+                id = "place:${match.id}",
+                name = match.name,
+                lineIds = match.lines?.mapNotNull { it.id } ?: emptyList(),
+                zone = match.zone ?: "",
+                latitude = lat,
+                longitude = lon,
+            )
+        }
+        (tubeMatches + extra).take(8)
+    }
+
+    /**
+     * Fetch ALL journey routes from a single TfL API call.
+     * TfL typically returns 3-5 journey options per request.
+     */
+    suspend fun fetchAllJourneyRoutesFromTfl(
+        fromStationId: String,
+        toStationId: String,
+        preference: String = "FASTEST",
+        fromLat: Double? = null,
+        fromLng: Double? = null,
+        toLat: Double? = null,
+        toLng: Double? = null,
+        toDisplayName: String? = null,
+    ): Result<List<JourneyRoute>> = runCatching {
+        val resolved = resolveJourneyParams(fromStationId, toStationId, fromLat, fromLng, toLat, toLng, toDisplayName)
+        val tflPreference = when (preference.uppercase()) {
+            "FEWEST_CHANGES" -> "leastinterchange"
+            "LEAST_WALKING" -> "leastwalking"
+            else -> "leasttime"
+        }
+        val journeyResponse = api.planJourney(
+            fromStationId = resolved.fromParam,
+            toStationId = resolved.toParam,
+            mode = "tube,elizabeth-line,bus,walking",
+            preference = tflPreference,
+        )
+        journeyResponse.journeys?.take(5)?.mapNotNull { journey ->
+            try { mapTflJourneyToRoute(journey, resolved.fromStation, resolved.toStation) } catch (_: Exception) { null }
+        } ?: emptyList()
+    }
+
     suspend fun fetchJourneyRouteFromTfl(
         fromStationId: String,
         toStationId: String,
         preference: String = "FASTEST",
         fromLat: Double? = null,
         fromLng: Double? = null,
+        toLat: Double? = null,
+        toLng: Double? = null,
+        toDisplayName: String? = null,
     ): Result<JourneyRoute> = runCatching {
-        val usingCoordinates = fromLat != null && fromLng != null
-
-        val fromStation: com.londontubeai.navigator.data.model.Station = if (usingCoordinates) {
-            com.londontubeai.navigator.data.model.Station(
-                id = "my-location",
-                name = "My Location",
-                lineIds = emptyList(),
-                zone = "",
-                latitude = fromLat!!,
-                longitude = fromLng!!,
-            )
-        } else {
-            TubeData.getStationById(fromStationId)
-                ?: throw IllegalArgumentException("Unknown from station: $fromStationId")
-        }
-
-        val toStation = TubeData.getStationById(toStationId)
-            ?: throw IllegalArgumentException("Unknown to station: $toStationId")
-
-        val fromParam: String = if (usingCoordinates) {
-            "$fromLat,$fromLng"
-        } else {
-            NaptanIds.forStation(fromStationId)
-                ?: throw IllegalArgumentException("No NapTan mapping for: $fromStationId")
-        }
-        val toNaptan = NaptanIds.forStation(toStationId)
-            ?: throw IllegalArgumentException("No NapTan mapping for: $toStationId")
-
+        val resolved = resolveJourneyParams(fromStationId, toStationId, fromLat, fromLng, toLat, toLng, toDisplayName)
         val tflPreference = when (preference.uppercase()) {
             "FEWEST_CHANGES" -> "leastinterchange"
             "LEAST_WALKING" -> "leastwalking"
             else -> "leasttime"
         }
-
         val journeyResponse = api.planJourney(
-            fromStationId = fromParam,
-            toStationId = toNaptan,
+            fromStationId = resolved.fromParam,
+            toStationId = resolved.toParam,
             mode = "tube,elizabeth-line,bus,walking",
             preference = tflPreference,
         )
-
         val selectedJourney = journeyResponse.journeys?.firstOrNull()
             ?: throw IllegalStateException("No TfL journey legs available")
+        mapTflJourneyToRoute(selectedJourney, resolved.fromStation, resolved.toStation)
+    }
+
+    private data class ResolvedJourneyParams(
+        val fromStation: Station,
+        val toStation: Station,
+        val fromParam: String,
+        val toParam: String,
+    )
+
+    private fun resolveJourneyParams(
+        fromStationId: String,
+        toStationId: String,
+        fromLat: Double?,
+        fromLng: Double?,
+        toLat: Double?,
+        toLng: Double?,
+        toDisplayName: String?,
+    ): ResolvedJourneyParams {
+        val usingCoordinates = fromLat != null && fromLng != null
+        val fromStation = if (usingCoordinates) {
+            Station(id = "my-location", name = "My Location", lineIds = emptyList(), zone = "", latitude = fromLat!!, longitude = fromLng!!)
+        } else {
+            TubeData.getStationById(fromStationId) ?: throw IllegalArgumentException("Unknown from station: $fromStationId")
+        }
+        val usingToCoordinates = toLat != null && toLng != null || toStationId.startsWith("place:")
+        val toStation = if (usingToCoordinates) {
+            Station(id = toStationId, name = toDisplayName ?: TubeData.getStationById(toStationId)?.name ?: "Destination", lineIds = emptyList(), zone = "", latitude = toLat ?: 0.0, longitude = toLng ?: 0.0)
+        } else {
+            TubeData.getStationById(toStationId) ?: throw IllegalArgumentException("Unknown to station: $toStationId")
+        }
+        val fromParam = if (usingCoordinates) "$fromLat,$fromLng" else NaptanIds.forStation(fromStationId) ?: throw IllegalArgumentException("No NapTan mapping for: $fromStationId")
+        val toParam = if (usingToCoordinates) "${toLat ?: toStation.latitude},${toLng ?: toStation.longitude}" else NaptanIds.forStation(toStationId) ?: throw IllegalArgumentException("No NapTan mapping for: $toStationId")
+        return ResolvedJourneyParams(fromStation, toStation, fromParam, toParam)
+    }
+
+    private fun mapTflJourneyToRoute(
+        selectedJourney: com.londontubeai.navigator.data.remote.TflJourney,
+        fromStation: Station,
+        toStation: Station,
+    ): JourneyRoute {
 
         val mappedLegs = selectedJourney.legs.mapIndexedNotNull { index, tflLeg ->
             val previousLeg = selectedJourney.legs.getOrNull(index - 1)
@@ -359,7 +429,7 @@ class TubeRepository @Inject constructor(
         val totalWalkingMinutes = mappedLegs.filter { it.mode == TransportMode.WALKING }.sumOf { it.durationMinutes }
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
 
-        JourneyRoute(
+        return JourneyRoute(
             fromStation = fromStation,
             toStation = toStation,
             legs = mappedLegs,

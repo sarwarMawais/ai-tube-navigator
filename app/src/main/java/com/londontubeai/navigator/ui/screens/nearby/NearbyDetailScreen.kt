@@ -26,9 +26,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.AccessibleForward
+import androidx.compose.material.icons.automirrored.filled.AccessibleForward
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.DirectionsBus
-import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.NearMe
@@ -75,6 +75,9 @@ import com.londontubeai.navigator.ui.theme.TubeAccent
 import com.londontubeai.navigator.ui.theme.TubePrimary
 import com.londontubeai.navigator.ui.theme.TubeSecondary
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -116,12 +119,12 @@ fun NearbyDetailScreen(
             uiState.nearbyStations.isEmpty() -> EmptyState()
             else -> {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars),
                     contentPadding = PaddingValues(
                         start = Spacing.screenHorizontal,
                         end = Spacing.screenHorizontal,
                         top = Spacing.md,
-                        bottom = Spacing.lg,
+                        bottom = 100.dp,
                     ),
                     verticalArrangement = Arrangement.spacedBy(Spacing.md),
                 ) {
@@ -279,7 +282,7 @@ private fun JourneyModeLegend() {
             modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.screenHorizontal, vertical = Spacing.sm),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            LegendItem(Icons.Filled.DirectionsWalk, "Walk", WalkGreen)
+            LegendItem(Icons.AutoMirrored.Filled.DirectionsWalk, "Walk", WalkGreen)
             LegendItem(Icons.Filled.DirectionsBus, "Bus", BusRed)
             LegendItem(Icons.Filled.Train, "Tube", TubeBlue)
         }
@@ -363,7 +366,13 @@ private fun NearbyStationCard(
                     .height(4.dp)
                     .background(
                         Brush.horizontalGradient(
-                            colors = stationLines.take(3).map { it.color }.ifEmpty { listOf(primaryLineColor, primaryLineColor) }
+                            colors = stationLines.take(3).map { it.color }.let { c ->
+                                when {
+                                    c.size >= 2 -> c
+                                    c.size == 1 -> listOf(c[0], c[0])
+                                    else -> listOf(primaryLineColor, primaryLineColor)
+                                }
+                            }
                         )
                     )
             )
@@ -416,7 +425,7 @@ private fun NearbyStationCard(
                                 Spacer(modifier = Modifier.width(Spacing.sm))
                                 Surface(shape = RoundedCornerShape(6.dp), color = StatusGood.copy(alpha = 0.1f)) {
                                     Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Filled.AccessibleForward, null, tint = StatusGood, modifier = Modifier.size(10.dp))
+                                        Icon(Icons.AutoMirrored.Filled.AccessibleForward, null, tint = StatusGood, modifier = Modifier.size(10.dp))
                                         Spacer(modifier = Modifier.width(2.dp))
                                         Text("Step-free", style = MaterialTheme.typography.labelSmall, color = StatusGood, fontSize = 9.sp)
                                     }
@@ -465,7 +474,7 @@ private fun NearbyStationCard(
                 Spacer(modifier = Modifier.height(Spacing.md))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     JourneyOptionChip(
-                        icon = Icons.Filled.DirectionsWalk,
+                        icon = Icons.AutoMirrored.Filled.DirectionsWalk,
                         label = "${nearbyStation.walkingMinutes} min walk",
                         color = WalkGreen,
                         modifier = Modifier.weight(1f),
@@ -627,14 +636,18 @@ private fun BusRouteRow(bus: BusRoute) {
             }
             Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = BusRed.copy(alpha = 0.12f),
+                color = if (bus.estimatedMinutes <= 1) StatusGood.copy(alpha = 0.15f)
+                       else if (bus.estimatedMinutes <= 5) StatusMinor.copy(alpha = 0.15f)
+                       else BusRed.copy(alpha = 0.12f),
             ) {
                 Text(
-                    "${bus.estimatedMinutes} min",
+                    if (bus.estimatedMinutes <= 0) "Due" else "${bus.estimatedMinutes} min",
                     modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
-                    color = BusRed,
+                    color = if (bus.estimatedMinutes <= 1) StatusGood
+                           else if (bus.estimatedMinutes <= 5) StatusMinor
+                           else BusRed,
                 )
             }
         }

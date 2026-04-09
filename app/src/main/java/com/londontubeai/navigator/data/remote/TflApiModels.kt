@@ -122,6 +122,21 @@ data class TflDisruptionResponse(
     @SerializedName("affectedStops") val affectedStops: List<TflPoint>?,
 )
 
+data class TflStopPointSearchResponse(
+    @SerializedName("matches") val matches: List<TflStopPointMatch>?,
+    @SerializedName("total") val total: Int?,
+)
+
+data class TflStopPointMatch(
+    @SerializedName("id") val id: String,
+    @SerializedName("name") val name: String,
+    @SerializedName("lat") val lat: Double?,
+    @SerializedName("lon") val lon: Double?,
+    @SerializedName("modes") val modes: List<String>?,
+    @SerializedName("lines") val lines: List<TflLineIdentifier>?,
+    @SerializedName("zone") val zone: String?,
+)
+
 data class TflAffectedRoute(
     @SerializedName("id") val id: String?,
     @SerializedName("name") val name: String?,

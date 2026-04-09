@@ -56,6 +56,14 @@ interface TflApiService {
         @Query("journeyPreference") preference: String = "leasttime",
     ): TflJourneyResponse
 
+    // ── Place / StopPoint Search ────────────────────────────
+    @GET("StopPoint/Search/{query}")
+    suspend fun searchStopPoints(
+        @Path("query") query: String,
+        @Query("modes") modes: String = "tube,elizabeth-line,bus,national-rail",
+        @Query("maxResults") maxResults: Int = 10,
+    ): TflStopPointSearchResponse
+
     // ── StopPoint / Station Info ─────────────────────────────
     @GET("StopPoint/{stopPointId}")
     suspend fun getStopPoint(
