@@ -133,7 +133,7 @@ class RouteViewModel @Inject constructor(
                         locationService.calculateDistance(lat, lng, it.latitude, it.longitude)
                     }
                     val nearestWalkMins = nearestDist?.let { km ->
-                        ((km * 1000) / 80).toInt().coerceAtLeast(1)
+                        (km * 12.0).toInt().coerceAtLeast(1)
                     }
 
                     val shouldAutoPopulate = autoPopulateFrom && _uiState.value.fromStation == null
@@ -608,8 +608,15 @@ class RouteViewModel @Inject constructor(
         if (nearest.id == toStation.id) return null
 
         val distKm = locationService.calculateDistance(lat, lng, nearest.latitude, nearest.longitude)
-        val walkMins = ((distKm * 1000) / 80).toInt().coerceAtLeast(1)
-        val walkDistM = (distKm * 1000).toInt()
+
+        // If nearest tube station is too far away (user is well outside London),
+        // the local Dijkstra fallback would produce nonsensical walking routes.
+        // Return null so the caller can show a proper "outside London" error.
+        if (distKm > 15.0) return null
+
+        // Walking speed: ~5 km/h = ~83 m/min ≈ 12 min per km
+        val walkMins = (distKm * 12.0).toInt().coerceAtLeast(1)
+        val walkDistM = (distKm * 1000.0).toInt()
 
         val tubeRoute = repository.findRoute(nearest.id, toStation.id, preference) ?: return null
 
@@ -632,7 +639,8 @@ class RouteViewModel @Inject constructor(
             intermediateStops = 0,
             mode = com.londontubeai.navigator.data.model.TransportMode.WALKING,
             walkingDistanceMeters = walkDistM,
-            walkingDirections = "Head towards ${nearest.name} (${String.format("%.1f", distKm)} km)",
+            walkingDirections = if (distKm < 1.0) "Head towards ${nearest.name} (${(distKm * 1000).toInt()}m)"
+                                else "Head towards ${nearest.name} (${String.format("%.1f", distKm)} km)",
         )
         return tubeRoute.copy(
             fromStation = myLocation,

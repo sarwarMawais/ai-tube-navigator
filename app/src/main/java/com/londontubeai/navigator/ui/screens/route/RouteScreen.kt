@@ -38,9 +38,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -884,8 +886,6 @@ private fun RouteOptionCard(
     val departureTime = String.format("%02d:%02d", nowCal.get(Calendar.HOUR_OF_DAY), nowCal.get(Calendar.MINUTE))
     val arrivalTime = String.format("%02d:%02d", arrivalCal.get(Calendar.HOUR_OF_DAY), arrivalCal.get(Calendar.MINUTE))
     val durationLabel = formatDuration(route.totalDurationMinutes)
-    val firstTubeLeg = route.legs.firstOrNull { it.mode == TransportMode.TUBE }
-    val allTubeLegs = route.legs.filter { it.mode == TransportMode.TUBE }
 
     Column(
         modifier = Modifier
@@ -894,66 +894,45 @@ private fun RouteOptionCard(
             .clickable { onSelect() }
             .padding(horizontal = 20.dp, vertical = 14.dp),
     ) {
-        // ── Label row ──────────────────────────────────────
+        // ── Row 1: label + selection indicator ─────────────
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (option.isRecommended && isSelected) {
-                    Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)) {
-                        Text(
-                            "Recommended",
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(7.dp))
-                }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     option.label,
                     style = MaterialTheme.typography.labelLarge,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                 )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (extraMins > 0) {
-                    Text(
-                        "+${extraMins} min",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else if (isSelected) {
-                    Icon(Icons.Filled.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                if (option.isRecommended) {
+                    Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = if (isSelected) 0.15f else 0.08f)) {
+                        Text("✓ Best", modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
                 }
+            }
+            if (extraMins > 0) {
+                Text("+${extraMins} min", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (isSelected) {
+                Icon(Icons.Filled.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // ── Time range row (Google Maps style) ──────────────
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        // ── Row 2: time range + AI badge + duration pill ────
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "$departureTime – $arrivalTime",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.ExtraBold,
-                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                 modifier = Modifier.weight(1f),
             )
-            if (isSelected && route.aiTimePredictionMinutes > 0 && route.aiTimePredictionMinutes != route.totalDurationMinutes) {
-                Surface(shape = RoundedCornerShape(8.dp), color = StatusMinor.copy(alpha = 0.1f)) {
-                    Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Timer, null, tint = StatusMinor, modifier = Modifier.size(11.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("AI: ${route.aiTimePredictionMinutes}m", style = MaterialTheme.typography.labelSmall, color = StatusMinor, fontWeight = FontWeight.Bold)
-                    }
+            if (route.aiTimePredictionMinutes > 0 && route.aiTimePredictionMinutes != route.totalDurationMinutes) {
+                Surface(shape = RoundedCornerShape(6.dp), color = StatusMinor.copy(alpha = 0.1f)) {
+                    Text("AI: ${route.aiTimePredictionMinutes}m", modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = StatusMinor, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.width(6.dp))
             }
@@ -961,40 +940,84 @@ private fun RouteOptionCard(
                 shape = RoundedCornerShape(8.dp),
                 color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
             ) {
-                Text(
-                    durationLabel,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text(durationLabel, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // ── Transit step icons row (Google Maps style) ──────
-        TransitStepsRow(legs = route.legs)
+        // ── Row 3: Compact single-line transit strip ─────────
+        CompactTransitStrip(legs = route.legs)
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // ── Compact info row ──────────────────────────────────
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val changes = route.totalInterchanges
-            val infoItems = buildList {
-                add(if (changes == 0) "Direct" else "$changes change${if (changes != 1) "s" else ""}")
-                if (route.totalStops > 0) add("${route.totalStops} stops")
-                if (route.totalWalkingMinutes > 0) add("${route.totalWalkingMinutes}m walk")
-                if (route.co2SavedGrams > 0) add("${route.co2SavedGrams}g CO₂ saved")
+        // ── Row 4: Info chips ─────────────────────────────────
+        val changes = route.totalInterchanges
+        val infoItems = buildList {
+            add(if (changes == 0) "Direct" else "$changes change${if (changes != 1) "s" else ""}")
+            if (route.totalStops > 0) add("${route.totalStops} stops")
+            if (route.totalWalkingMinutes > 0) add("${route.totalWalkingMinutes}m walk")
+            if (route.co2SavedGrams > 0) add("${route.co2SavedGrams}g CO₂")
+        }
+        Text(
+            infoItems.joinToString("  ·  "),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun CompactTransitStrip(legs: List<com.londontubeai.navigator.data.model.JourneyLeg>) {
+    val busRed = Color(0xFFE32017)
+    val walkGrey = Color(0xFF607D8B)
+    // Only show meaningful legs — skip zero-duration walking
+    val displayLegs = legs.filter { it.mode != TransportMode.WALKING || it.durationMinutes >= 2 }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+    ) {
+        displayLegs.forEachIndexed { index, leg ->
+            when (leg.mode) {
+                TransportMode.WALKING -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 2.dp),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.DirectionsWalk, null, tint = walkGrey, modifier = Modifier.size(13.dp))
+                        Text("${leg.durationMinutes}m", style = MaterialTheme.typography.labelSmall, color = walkGrey, fontWeight = FontWeight.Medium)
+                    }
+                }
+                TransportMode.BUS -> {
+                    Surface(shape = RoundedCornerShape(5.dp), color = busRed) {
+                        Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.DirectionsBus, null, tint = Color.White, modifier = Modifier.size(10.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(leg.busRouteNumber.ifBlank { leg.line.name }.take(5), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        }
+                    }
+                }
+                TransportMode.TUBE -> {
+                    val isLight = leg.line.color == com.londontubeai.navigator.ui.theme.TubeLineColors.Circle ||
+                        leg.line.color == com.londontubeai.navigator.ui.theme.TubeLineColors.HammersmithCity ||
+                        leg.line.color == com.londontubeai.navigator.ui.theme.TubeLineColors.WaterlooCity
+                    Surface(shape = RoundedCornerShape(5.dp), color = leg.line.color) {
+                        Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Train, null, tint = if (isLight) Color.Black else Color.White, modifier = Modifier.size(10.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                leg.line.name.split(" ").take(1).joinToString("").take(8),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isLight) Color.Black else Color.White,
+                            )
+                        }
+                    }
+                }
             }
-            Text(
-                infoItems.joinToString("  ·  "),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (index < displayLegs.size - 1) {
+                Text(" › ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+            }
         }
     }
 }
@@ -1074,7 +1097,8 @@ private fun ActionButton(
 
 @Composable
 private fun GoogleMapsTimelineCard(route: com.londontubeai.navigator.data.model.JourneyRoute, isInsideLondon: Boolean) {
-    var expanded by remember { mutableStateOf(true) }
+    val routeKey = "${route.fromStation.id}-${route.toStation.id}-${route.totalDurationMinutes}-${route.legs.size}"
+    var expanded by remember(routeKey) { mutableStateOf(true) }
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         shape = RoundedCornerShape(20.dp),
@@ -1958,103 +1982,6 @@ private fun formatDuration(minutes: Int): String {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun TransitStepsRow(legs: List<com.londontubeai.navigator.data.model.JourneyLeg>) {
-    val busRed = Color(0xFFE32017)
-    val walkGrey = Color(0xFF78909C)
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.Center,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        legs.forEachIndexed { index, leg ->
-            when (leg.mode) {
-                com.londontubeai.navigator.data.model.TransportMode.WALKING -> {
-                    if (leg.durationMinutes > 0) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .background(walkGrey.copy(alpha = 0.10f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 7.dp, vertical = 4.dp),
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.DirectionsWalk,
-                                contentDescription = null,
-                                tint = walkGrey,
-                                modifier = Modifier.size(13.dp),
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                "${leg.durationMinutes}m",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = walkGrey,
-                            )
-                        }
-                    }
-                }
-                com.londontubeai.navigator.data.model.TransportMode.BUS -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .background(busRed, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 7.dp, vertical = 4.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.DirectionsBus,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(11.dp),
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                            leg.busRouteNumber.ifBlank { leg.line.name.take(4) },
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                        )
-                    }
-                }
-                com.londontubeai.navigator.data.model.TransportMode.TUBE -> {
-                    val isLight = leg.line.color == com.londontubeai.navigator.ui.theme.TubeLineColors.Circle ||
-                        leg.line.color == com.londontubeai.navigator.ui.theme.TubeLineColors.HammersmithCity ||
-                        leg.line.color == com.londontubeai.navigator.ui.theme.TubeLineColors.WaterlooCity
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .background(leg.line.color, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 7.dp, vertical = 4.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Train,
-                            contentDescription = null,
-                            tint = if (isLight) Color.Black else Color.White,
-                            modifier = Modifier.size(11.dp),
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                            leg.line.name.split(" ").take(2).joinToString(" "),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = if (isLight) Color.Black else Color.White,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-            // Arrow separator between steps
-            if (index < legs.size - 1) {
-                Text(
-                    "›",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.align(Alignment.CenterVertically),
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun crowdColor(level: CrowdLevel): Color = when (level) {

@@ -251,7 +251,7 @@ class TubeRepository @Inject constructor(
         val journeyResponse = api.planJourney(
             fromStationId = resolved.fromParam,
             toStationId = resolved.toParam,
-            mode = "tube,elizabeth-line,bus,walking",
+            mode = "tube,elizabeth-line,dlr,overground,national-rail,bus,walking",
             preference = tflPreference,
         )
         journeyResponse.journeys?.take(5)?.mapNotNull { journey ->
@@ -278,7 +278,7 @@ class TubeRepository @Inject constructor(
         val journeyResponse = api.planJourney(
             fromStationId = resolved.fromParam,
             toStationId = resolved.toParam,
-            mode = "tube,elizabeth-line,bus,walking",
+            mode = "tube,elizabeth-line,dlr,overground,national-rail,bus,walking",
             preference = tflPreference,
         )
         val selectedJourney = journeyResponse.journeys?.firstOrNull()
@@ -337,7 +337,7 @@ class TubeRepository @Inject constructor(
             val modeId = tflLeg.mode?.id?.lowercase().orEmpty()
             val mode = when {
                 modeId.contains("walk") -> TransportMode.WALKING
-                modeId.contains("bus") -> TransportMode.BUS
+                modeId.contains("bus") || modeId.contains("coach") -> TransportMode.BUS
                 else -> TransportMode.TUBE
             }
 
@@ -351,19 +351,24 @@ class TubeRepository @Inject constructor(
                 )
                 TransportMode.BUS -> TubeLine(
                     id = lineIdentifier?.id ?: "bus",
-                    name = lineIdentifier?.name ?: "Bus",
+                    name = lineIdentifier?.name?.let { "Bus $it" } ?: tflLeg.routeOptions?.firstOrNull()?.name ?: "Bus",
                     color = androidx.compose.ui.graphics.Color(0xFFE32017),
                     stationIds = emptyList(),
                 )
                 TransportMode.TUBE -> {
-                    val maybeId = lineIdentifier?.id
+                    val maybeId = lineIdentifier?.id?.lowercase()
                     val byId = maybeId?.let { TubeData.getLineById(it) }
-                    byId ?: TubeLine(
-                        id = maybeId ?: "tube",
-                        name = lineIdentifier?.name ?: tflLeg.routeOptions?.firstOrNull()?.name ?: "Tube",
-                        color = TubeLineColors.Jubilee,
-                        stationIds = emptyList(),
-                    )
+                    byId ?: when {
+                        modeId.contains("national-rail") || modeId.contains("national_rail") ->
+                            TubeLine(id = maybeId ?: "national-rail", name = lineIdentifier?.name ?: "National Rail", color = androidx.compose.ui.graphics.Color(0xFF0A3C78), stationIds = emptyList())
+                        modeId.contains("overground") ->
+                            TubeLine(id = maybeId ?: "overground", name = lineIdentifier?.name ?: "Overground", color = androidx.compose.ui.graphics.Color(0xFFEF7B10), stationIds = emptyList())
+                        modeId.contains("dlr") ->
+                            TubeLine(id = maybeId ?: "dlr", name = lineIdentifier?.name ?: "DLR", color = androidx.compose.ui.graphics.Color(0xFF00AFAD), stationIds = emptyList())
+                        modeId.contains("elizabeth") ->
+                            TubeLine(id = maybeId ?: "elizabeth-line", name = lineIdentifier?.name ?: "Elizabeth line", color = androidx.compose.ui.graphics.Color(0xFF6950A1), stationIds = emptyList())
+                        else -> TubeLine(id = maybeId ?: "tube", name = lineIdentifier?.name ?: tflLeg.routeOptions?.firstOrNull()?.name ?: "Tube", color = TubeLineColors.Jubilee, stationIds = emptyList())
+                    }
                 }
             }
 
