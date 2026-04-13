@@ -169,8 +169,7 @@ private fun NearbyOverviewCard(uiState: NearbyDetailUiState) {
                         Color(0xFF0D2240),
                     )
                 )
-            )
-            .shadow(8.dp, RoundedCornerShape(24.dp)),
+            ),
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -355,7 +354,7 @@ private fun NearbyStationCard(
         modifier = Modifier.fillMaxWidth().animateContentSize(tween(300)),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (expanded) 6.dp else 2.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         onClick = { expanded = !expanded },
     ) {
         Column {

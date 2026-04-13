@@ -1,7 +1,10 @@
 package com.londontubeai.navigator.ui.screens.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AccessibleForward
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
@@ -91,6 +95,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.londontubeai.navigator.data.model.TubeData
+import com.londontubeai.navigator.ui.appicon.AppIconManager
 import com.londontubeai.navigator.ui.theme.StatusGood
 import com.londontubeai.navigator.ui.theme.StatusSevere
 import com.londontubeai.navigator.ui.theme.TubeAccent
@@ -110,6 +115,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val prefs by viewModel.prefsState.collectAsStateWithLifecycle()
+    val currentIconId by viewModel.currentIconId.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -135,33 +141,57 @@ fun SettingsScreen(
         ) {
             // ── Upgrade to Premium banner ──────────────────────
             item {
-                Card(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = Spacing.xl, vertical = Spacing.md)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFFFF8F00),
+                                    Color(0xFFE65100),
+                                )
+                            )
+                        )
                         .clickable(onClick = onNavigateToPremium),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(Spacing.lg),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(
-                            modifier = Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)),
+                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.2f)),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(Icons.Filled.Star, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(24.dp))
+                            Icon(Icons.Filled.Star, null, tint = Color(0xFFFFECB3), modifier = Modifier.size(26.dp))
                         }
                         Spacer(modifier = Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Upgrade to Pro", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                            Text("Unlock AI predictions, alerts & more", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f))
+                            Text(
+                                "Upgrade to Pro",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                            )
+                            Text(
+                                "Unlock AI predictions, live alerts & more",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.88f),
+                            )
                         }
-                        Icon(Icons.Filled.ChevronRight, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(24.dp))
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color.White.copy(alpha = 0.22f),
+                        ) {
+                            Text(
+                                "Get Pro",
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                            )
+                        }
                     }
                 }
             }
@@ -303,6 +333,9 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            // ── App Icon picker ───────────────────────────────
+            item { AppIconPickerCard(currentIconId = currentIconId, onSelectIcon = { viewModel.setIcon(it) }) }
 
             // ═══════════════════════════════════════════════════
             // 4. NOTIFICATIONS
@@ -958,5 +991,77 @@ private fun SettingsSlider(
                 inactiveTrackColor = iconColor.copy(alpha = 0.15f),
             ),
         )
+    }
+}
+
+@Composable
+private fun AppIconPickerCard(
+    currentIconId: String,
+    onSelectIcon: (String) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = Spacing.xl, vertical = Spacing.xs)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = Spacing.sm),
+        ) {
+            Box(
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(TubePrimary.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Palette, null, tint = TubePrimary, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("App Icon", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text("Choose your home screen icon style", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            AppIconManager.ALL_ICONS.forEach { icon ->
+                val selected = icon.id == currentIconId
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clickable { onSelectIcon(icon.id) }
+                        .padding(vertical = 4.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        Color(icon.gradientStart),
+                                        Color(icon.gradientMid),
+                                        Color(icon.gradientEnd),
+                                    )
+                                )
+                            )
+                            .then(
+                                if (selected) Modifier.border(2.5.dp, Color.White, RoundedCornerShape(14.dp))
+                                else Modifier
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (selected) {
+                            Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        icon.name,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        color = if (selected) TubePrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }

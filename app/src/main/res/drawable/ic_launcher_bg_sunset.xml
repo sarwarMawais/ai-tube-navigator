@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Dark crimson top → warm amber bottom -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="54" android:startY="0" android:endX="54" android:endY="108" android:type="linear">
+                <item android:offset="0.0" android:color="#FF2C0000" />
+                <item android:offset="0.35" android:color="#FF881800" />
+                <item android:offset="0.7"  android:color="#FFD04010" />
+                <item android:offset="1.0"  android:color="#FFEC7020" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Warm wave bands rising from bottom -->
+    <path android:fillColor="#FFEC9030" android:fillAlpha="0.28"
+        android:pathData="M0,88Q27,80 54,84Q81,80 108,86L108,108L0,108Z"/>
+    <path android:fillColor="#FFFFA030" android:fillAlpha="0.18"
+        android:pathData="M0,96Q27,91 54,94Q81,91 108,96L108,108L0,108Z"/>
+
+    <!-- Shimmer horizon lines -->
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.08" android:strokeWidth="0.8"
+        android:pathData="M0,72Q27,68 54,72Q81,68 108,72"/>
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.06" android:strokeWidth="0.7"
+        android:pathData="M0,60Q27,56 54,60Q81,56 108,60"/>
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.04" android:strokeWidth="0.6"
+        android:pathData="M0,50Q27,46 54,50Q81,46 108,50"/>
+
+    <!-- Hot ember glow (top corner) -->
+    <path android:fillColor="#FF6000" android:fillAlpha="0.14"
+        android:pathData="M90,0a38,38 0 1 1 18,18Z"/>
+
+</vector>

@@ -54,6 +54,11 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Settings,
     )
 
+    data object Splash : Screen(
+        route = "splash",
+        title = "Splash",
+    )
+
     data object Onboarding : Screen(
         route = "onboarding",
         title = "Welcome",

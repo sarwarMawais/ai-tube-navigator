@@ -42,6 +42,23 @@ class TubeRepository @Inject constructor(
     private val crowdEngine: CrowdPredictionEngine,
     private val delayEngine: DelayPredictionEngine,
 ) {
+    // ── Route cache (used by MapScreen to avoid re-fetching) ─────────────────
+    @Volatile private var lastRouteFromId: String? = null
+    @Volatile private var lastRouteToId: String? = null
+    @Volatile private var lastJourneyRoute: JourneyRoute? = null
+
+    fun getLastJourneyRoute(fromId: String, toId: String): JourneyRoute? {
+        val cached = lastJourneyRoute ?: return null
+        return if ((fromId == lastRouteFromId && toId == lastRouteToId) ||
+                   (cached.fromStation.id == fromId && cached.toStation.id == toId)) cached else null
+    }
+
+    fun cacheRoute(route: JourneyRoute) {
+        lastRouteFromId = route.fromStation.id
+        lastRouteToId   = route.toStation.id
+        lastJourneyRoute = route
+    }
+
     // ── Line Status ─────────────────────────────────────────
 
     suspend fun fetchLiveLineStatuses(): Result<List<LineStatus>> = runCatching {
@@ -88,17 +105,48 @@ class TubeRepository @Inject constructor(
 
     // ── Real-Time Arrivals ───────────────────────────────────
 
-    suspend fun fetchStationArrivals(stationId: String): Result<StationArrivals> = runCatching {
+    suspend fun fetchStationArrivals(stationId: String): Result<StationArrivals> {
         val station = TubeData.getStationById(stationId)
-            ?: throw IllegalArgumentException("Station not found: $stationId")
+            ?: return Result.failure(IllegalArgumentException("Station not found: $stationId"))
         val naptanId = NaptanIds.forStation(stationId)
-            ?: throw IllegalArgumentException("No NapTan ID for station: $stationId")
-        val arrivals = mapArrivals(api.getStationArrivals(naptanId))
-        StationArrivals(
-            stationId = stationId,
-            stationName = station.name,
-            arrivals = arrivals,
-        )
+            ?: return Result.failure(IllegalArgumentException("No NapTan ID for station: $stationId"))
+        return runCatching {
+            val arrivals = mapArrivals(api.getStationArrivals(naptanId))
+            // Cache on success
+            val cacheNow = System.currentTimeMillis()
+            dao.clearCachedArrivals(stationId)
+            dao.insertCachedArrivals(arrivals.map { a ->
+                com.londontubeai.navigator.data.local.entity.CachedArrivalEntity(
+                    stationId = stationId,
+                    lineId = a.lineId,
+                    lineName = a.lineName,
+                    platform = a.platform,
+                    destination = a.destination,
+                    direction = a.direction,
+                    timeToStationSeconds = a.timeToStationSeconds,
+                    expectedArrival = a.expectedArrival,
+                    cachedAt = cacheNow,
+                )
+            })
+            StationArrivals(stationId = stationId, stationName = station.name, arrivals = arrivals)
+        }.recoverCatching { err ->
+            // Offline fallback — return cached arrivals (may be stale but better than nothing)
+            val cached = dao.getCachedArrivals(stationId)
+            if (cached.isNotEmpty()) {
+                val arrivals = cached.map { c ->
+                    val lineColor = TubeData.getLineById(c.lineId)?.color ?: TubeLineColors.Jubilee
+                    LiveArrival(
+                        lineId = c.lineId, lineName = c.lineName, lineColor = lineColor,
+                        platform = c.platform, direction = c.direction, destination = c.destination,
+                        timeToStationSeconds = c.timeToStationSeconds, currentLocation = "",
+                        expectedArrival = c.expectedArrival,
+                    )
+                }
+                StationArrivals(stationId = stationId, stationName = station.name, arrivals = arrivals, isCached = true)
+            } else {
+                throw err
+            }
+        }
     }
 
     suspend fun fetchStopPointArrivals(stopPointId: String): Result<List<LiveArrival>> = runCatching {
@@ -188,6 +236,10 @@ class TubeRepository @Inject constructor(
                 fromStationName = from.name,
                 toStationId = to.id,
                 toStationName = to.name,
+                fromLat = from.latitude,
+                fromLng = from.longitude,
+                toLat = to.latitude,
+                toLng = to.longitude,
             )
         )
 
@@ -205,14 +257,14 @@ class TubeRepository @Inject constructor(
         dao.saveUserPreferences(prefs)
 
     suspend fun searchPlaces(query: String): Result<List<Station>> = runCatching {
-        val tflResults = try {
-            api.searchStopPoints(query).matches.orEmpty()
-        } catch (e: Exception) {
-            emptyList()
-        }
         val tubeMatches = TubeData.searchStations(query)
         val tubeNamesLower = tubeMatches.map { it.name.lowercase() }.toSet()
-        val extra = tflResults.mapNotNull { match ->
+
+        // TfL stop point search (bus stops, rail, etc.)
+        val tflResults = try {
+            api.searchStopPoints(query, maxResults = 8).matches.orEmpty()
+        } catch (e: Exception) { emptyList() }
+        val tflExtra = tflResults.mapNotNull { match ->
             val lat = match.lat ?: return@mapNotNull null
             val lon = match.lon ?: return@mapNotNull null
             if (match.name.lowercase() in tubeNamesLower) return@mapNotNull null
@@ -225,7 +277,40 @@ class TubeRepository @Inject constructor(
                 longitude = lon,
             )
         }
-        (tubeMatches + extra).take(8)
+
+        // Nominatim geocoder — free, covers all London addresses, hospitals, POIs
+        val nominatimResults = try {
+            val encoded = java.net.URLEncoder.encode("$query, London", "UTF-8")
+            val url = java.net.URL("https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=5&countrycodes=gb&bounded=1&viewbox=-0.51,51.69,0.33,51.28")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.setRequestProperty("User-Agent", "AITubeNavigator/1.0")
+            conn.connectTimeout = 4000
+            conn.readTimeout = 4000
+            val json = conn.inputStream.bufferedReader().readText()
+            conn.disconnect()
+            val arr = org.json.JSONArray(json)
+            (0 until arr.length()).mapNotNull { i ->
+                val obj = arr.getJSONObject(i)
+                val lat = obj.optDouble("lat", Double.NaN).takeIf { !it.isNaN() } ?: return@mapNotNull null
+                val lon = obj.optDouble("lon", Double.NaN).takeIf { !it.isNaN() } ?: return@mapNotNull null
+                val displayName = obj.optString("display_name", "").split(",").take(2).joinToString(", ").trim()
+                if (displayName.isBlank()) return@mapNotNull null
+                val osmId = obj.optString("osm_id", "")
+                if (tubeNamesLower.any { displayName.lowercase().contains(it) }) return@mapNotNull null
+                Station(
+                    id = "place:osm:$osmId",
+                    name = displayName,
+                    lineIds = emptyList(),
+                    zone = "",
+                    latitude = lat,
+                    longitude = lon,
+                )
+            }
+        } catch (e: Exception) { emptyList() }
+
+        val allNames = (tubeNamesLower + tflExtra.map { it.name.lowercase() }).toSet()
+        val filteredNominatim = nominatimResults.filter { it.name.lowercase() !in allNames }
+        (tubeMatches + tflExtra + filteredNominatim).take(10)
     }
 
     /**
@@ -241,22 +326,41 @@ class TubeRepository @Inject constructor(
         toLat: Double? = null,
         toLng: Double? = null,
         toDisplayName: String? = null,
+        departureDate: String? = null,
+        departureTime: String? = null,
+        timeIs: String? = null,
     ): Result<List<JourneyRoute>> = runCatching {
         val resolved = resolveJourneyParams(fromStationId, toStationId, fromLat, fromLng, toLat, toLng, toDisplayName)
+        val isStepFree = preference.uppercase() == "STEP_FREE"
         val tflPreference = when (preference.uppercase()) {
             "FEWEST_CHANGES" -> "leastinterchange"
             "LEAST_WALKING" -> "leastwalking"
             else -> "leasttime"
         }
+        val accessibilityPref = if (isStepFree) "noSolidStairs,noEscalators" else null
+        val resolvedFromLat = fromLat ?: resolved.fromStation.latitude.takeIf { it != 0.0 }
+        val resolvedFromLng = fromLng ?: resolved.fromStation.longitude.takeIf { it != 0.0 }
+        val useNationalSearch = resolvedFromLat != null && resolvedFromLng != null && isOutsideLondon(resolvedFromLat, resolvedFromLng)
         val journeyResponse = api.planJourney(
             fromStationId = resolved.fromParam,
             toStationId = resolved.toParam,
             mode = "tube,elizabeth-line,dlr,overground,national-rail,bus,walking",
             preference = tflPreference,
+            nationalSearch = useNationalSearch,
+            date = departureDate,
+            time = departureTime,
+            timeIs = timeIs,
+            accessibilityPreference = accessibilityPref,
         )
-        journeyResponse.journeys?.take(5)?.mapNotNull { journey ->
-            try { mapTflJourneyToRoute(journey, resolved.fromStation, resolved.toStation) } catch (_: Exception) { null }
+        val routes = journeyResponse.journeys?.take(5)?.mapNotNull { journey ->
+            try { mapTflJourneyToRoute(journey, resolved.fromStation, resolved.toStation, isStepFree) } catch (_: Exception) { null }
         } ?: emptyList()
+        routes.firstOrNull()?.let {
+            lastRouteFromId = fromStationId
+            lastRouteToId = toStationId
+            lastJourneyRoute = it
+        }
+        routes
     }
 
     suspend fun fetchJourneyRouteFromTfl(
@@ -268,6 +372,9 @@ class TubeRepository @Inject constructor(
         toLat: Double? = null,
         toLng: Double? = null,
         toDisplayName: String? = null,
+        departureDate: String? = null,
+        departureTime: String? = null,
+        timeIs: String? = null,
     ): Result<JourneyRoute> = runCatching {
         val resolved = resolveJourneyParams(fromStationId, toStationId, fromLat, fromLng, toLat, toLng, toDisplayName)
         val tflPreference = when (preference.uppercase()) {
@@ -275,15 +382,24 @@ class TubeRepository @Inject constructor(
             "LEAST_WALKING" -> "leastwalking"
             else -> "leasttime"
         }
+        val useNationalSearch2 = fromLat != null && fromLng != null && isOutsideLondon(fromLat, fromLng)
         val journeyResponse = api.planJourney(
             fromStationId = resolved.fromParam,
             toStationId = resolved.toParam,
             mode = "tube,elizabeth-line,dlr,overground,national-rail,bus,walking",
             preference = tflPreference,
+            nationalSearch = useNationalSearch2,
+            date = departureDate,
+            time = departureTime,
+            timeIs = timeIs,
         )
         val selectedJourney = journeyResponse.journeys?.firstOrNull()
             ?: throw IllegalStateException("No TfL journey legs available")
-        mapTflJourneyToRoute(selectedJourney, resolved.fromStation, resolved.toStation)
+        mapTflJourneyToRoute(selectedJourney, resolved.fromStation, resolved.toStation).also {
+            lastRouteFromId = fromStationId
+            lastRouteToId = toStationId
+            lastJourneyRoute = it
+        }
     }
 
     private data class ResolvedJourneyParams(
@@ -292,6 +408,9 @@ class TubeRepository @Inject constructor(
         val fromParam: String,
         val toParam: String,
     )
+
+    private fun isOutsideLondon(lat: Double, lng: Double): Boolean =
+        lat < 51.28 || lat > 51.75 || lng < -0.65 || lng > 0.40
 
     private fun resolveJourneyParams(
         fromStationId: String,
@@ -323,6 +442,7 @@ class TubeRepository @Inject constructor(
         selectedJourney: com.londontubeai.navigator.data.remote.TflJourney,
         fromStation: Station,
         toStation: Station,
+        isStepFree: Boolean = false,
     ): JourneyRoute {
 
         val mappedLegs = selectedJourney.legs.mapIndexedNotNull { index, tflLeg ->
@@ -414,10 +534,21 @@ class TubeRepository @Inject constructor(
                     instructionDetailed.ifEmpty { instructionSummary }
                 } else { "" },
                 busRouteNumber = if (mode == TransportMode.BUS) (lineIdentifier?.id ?: mappedLine.id).uppercase() else "",
-                busStopName = if (mode == TransportMode.BUS) tflLeg.departurePoint?.commonName.orEmpty() else "",
-                busAlightStopName = if (mode == TransportMode.BUS) tflLeg.arrivalPoint?.commonName.orEmpty() else "",
+                busStopName = if (mode == TransportMode.BUS) {
+                    val name = tflLeg.departurePoint?.commonName?.takeIf { it.isNotBlank() } ?: from.name
+                    val indicator = tflLeg.departurePoint?.indicator?.takeIf { it.isNotBlank() }
+                        ?: tflLeg.departurePoint?.stopLetter?.takeIf { it.isNotBlank() }?.let { "Stop $it" }
+                    if (indicator != null) "$name ($indicator)" else name
+                } else "",
+                busAlightStopName = if (mode == TransportMode.BUS) {
+                    val name = tflLeg.arrivalPoint?.commonName?.takeIf { it.isNotBlank() } ?: to.name
+                    val indicator = tflLeg.arrivalPoint?.indicator?.takeIf { it.isNotBlank() }
+                        ?: tflLeg.arrivalPoint?.stopLetter?.takeIf { it.isNotBlank() }?.let { "Stop $it" }
+                    if (indicator != null) "$name ($indicator)" else name
+                } else "",
                 nextDepartureMinutes = 0,
                 platformNumber = platformText,
+                polylinePoints = parseLineString(tflLeg.path?.lineString),
             )
         }
 
@@ -447,6 +578,8 @@ class TubeRepository @Inject constructor(
             crowdPrediction = predictCrowding(fromStation.id, hour),
             calorieBurned = (totalDuration * 0.7).toInt(),
             co2SavedGrams = totalDuration * 14,
+            estimatedFarePounds = selectedJourney.fare?.totalCost?.let { it / 100.0 },
+            isStepFreeRoute = isStepFree,
         )
     }
 
@@ -665,12 +798,23 @@ class TubeRepository @Inject constructor(
 
     private fun extractPlatformFromInstruction(text: String): String? {
         if (text.isBlank()) return null
-        val regex = Regex("\\bplatform\\s+([\\dA-Za-z]+)", RegexOption.IGNORE_CASE)
-        val match = regex.find(text) ?: return null
-        return "Plat. ${match.groupValues[1]}"
+        val regex = Regex("platform\\s+(\\d+|\\w+)", RegexOption.IGNORE_CASE)
+        return regex.find(text)?.groupValues?.get(1)?.let { "Plat. $it" }
     }
 
-    private fun extractTowards(instruction: String?): String? {
+    private fun parseLineString(lineString: String?): List<Pair<Double, Double>> {
+        if (lineString.isNullOrBlank()) return emptyList()
+        return try {
+            val regex = Regex("""\[(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\]""")
+            regex.findAll(lineString).map { match ->
+                val lng = match.groupValues[1].toDouble()
+                val lat = match.groupValues[2].toDouble()
+                Pair(lat, lng)
+            }.toList()
+        } catch (e: Exception) { emptyList() }
+    }
+
+    private fun extractTowards(instruction: String): String? {
         if (instruction.isNullOrBlank()) return null
         val regex = Regex("towards (.+?)(?:\\s+for\\s|\\s+\\(|\$)", RegexOption.IGNORE_CASE)
         val match = regex.find(instruction) ?: return null

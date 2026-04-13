@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -56,7 +57,7 @@ fun PrivacyScreen(onBack: () -> Unit = {}) {
             shadowElevation = 2.dp,
         ) {
             Row(
-                modifier = Modifier.padding(start = 4.dp, end = 20.dp, top = 12.dp, bottom = 12.dp),
+                modifier = Modifier.statusBarsPadding().padding(start = 4.dp, end = 20.dp, top = 4.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack) {
@@ -81,13 +82,13 @@ fun PrivacyScreen(onBack: () -> Unit = {}) {
                 )
                 Spacer(modifier = Modifier.height(Spacing.xs))
                 Text(
-                    text = "Effective Date: 1 March 2026",
+                    text = "Effective Date: 11 April 2026",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(Spacing.sm))
                 Text(
-                    text = "AI Tube Navigator (\"we\", \"our\", \"the App\") is committed to protecting your privacy. This Privacy Policy explains what information we collect, how we use it, and your rights regarding your data. By using the App you agree to the practices described below.",
+                    text = "AI Tube Navigator (\"we\", \"our\", or \"the App\") is committed to protecting your privacy. This Privacy Policy explains what information we collect, how we use it, and your rights when using the App. By downloading or using AI Tube Navigator, you agree to the practices described in this policy.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 22.sp,
@@ -95,122 +96,93 @@ fun PrivacyScreen(onBack: () -> Unit = {}) {
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
 
-            // 1. Data Collection
             item {
                 PrivacySection(
                     icon = Icons.Filled.Storage,
                     title = "1. Information We Collect",
-                    description = "We follow a local-first architecture. All AI predictions, route calculations, and crowd analysis run entirely on your device.\n\n" +
-                            "Data stored locally on your device:\n" +
-                            "- Saved home/work stations and favourites\n" +
-                            "- Journey search history\n" +
-                            "- App preferences and settings\n" +
-                            "- Cached TfL line status data\n\n" +
-                            "We do NOT collect or store:\n" +
-                            "- Your name, email, or personal identity\n" +
-                            "- Contacts, photos, or files\n" +
-                            "- Payment information (handled by Google Play)\n" +
-                            "- Browsing history or cross-app data",
+                    description = "We collect only the minimum data required to provide the service.\n\n" +
+                        "On-device only (never transmitted): journey search history, saved journeys, favourite stations, route preferences, notification settings, and app theme preferences. All stored locally via Android DataStore and Room database.\n\n" +
+                        "We do NOT collect: your name, email address, contacts, photos, financial information, or any data that personally identifies you.",
                 )
             }
 
-            // 2. Location
             item {
                 PrivacySection(
                     icon = Icons.Filled.MyLocation,
                     title = "2. Location Data",
-                    description = "Location data is used solely for nearby station detection and live arrival information. Location is accessed only when the App is in the foreground and you have granted permission.\n\n" +
-                            "- Location is never stored permanently, transmitted to our servers, or shared with third parties.\n" +
-                            "- You may revoke location permission at any time via your device Settings without losing core App functionality.\n" +
-                            "- If location is unavailable, the App falls back to showing central London stations.",
+                    description = "With your permission, the App uses your device's GPS to show nearby stations, calculate walking times, and pre-fill your journey origin. Location is processed on-device and is never stored on our servers or shared with third parties.\n\n" +
+                        "You can revoke location permission at any time in your device Settings → Apps → AI Tube Navigator → Permissions.",
                 )
             }
 
-            // 3. Third-Party Services
             item {
                 PrivacySection(
                     icon = Icons.Filled.Share,
                     title = "3. Third-Party Services",
                     description = "The App communicates with the following external services:\n\n" +
-                            "- Transport for London (TfL) Unified API: To fetch live line status, arrival predictions, and station data. No personal data is sent. TfL's privacy policy applies to their services.\n" +
-                            "- Open-Meteo Weather API: To display weather conditions. Only device coordinates are sent; no user identity.\n" +
-                            "- Google Maps SDK: To render maps. Subject to Google's Privacy Policy.\n" +
-                            "- Google Play Billing: For premium subscription processing. Managed entirely by Google.\n\n" +
-                            "We do not use advertising SDKs, social media trackers, or sell data to any third party.",
+                        "• TfL Open Data API (api.tfl.gov.uk) — to fetch live train arrivals, line statuses, and route planning. No personal data is sent; only station/line identifiers and your optional API key.\n\n" +
+                        "• OpenWeatherMap API — to show current weather near your location. Only a coarse city-level coordinate is sent. Governed by OpenWeatherMap's Privacy Policy.\n\n" +
+                        "• Google Maps SDK — to render the interactive tube map. Governed by Google's Privacy Policy.\n\n" +
+                        "• Google Play Billing — for premium subscriptions, handled entirely by Google. We do not receive or store payment card details.",
                 )
             }
 
-            // 4. Analytics
             item {
                 PrivacySection(
                     icon = Icons.Filled.Analytics,
                     title = "4. Analytics & Crash Reporting",
-                    description = "Anonymous, aggregated usage analytics may be collected to improve app quality. No personally identifiable information is included.\n\n" +
-                            "- Analytics can be opted out of at any time in Settings.\n" +
-                            "- Crash reports contain only technical device information (OS version, device model) and stack traces, with no personal data.",
+                    description = "The App does not currently use third-party analytics or crash-reporting SDKs. If this changes in a future version, this policy will be updated and users notified. Any future analytics will be aggregated and anonymised.",
                 )
             }
 
-            // 5. Notifications
             item {
                 PrivacySection(
                     icon = Icons.Filled.Notifications,
                     title = "5. Notifications",
-                    description = "Push notifications are used for disruption alerts and commute reminders only. Notification preferences are fully customisable and can be disabled per channel or entirely in your device Settings.",
+                    description = "With your permission, the App may send push notifications about service disruptions and commute reminders. You can manage or disable these at any time in your device Settings → Apps → AI Tube Navigator → Notifications, or within the App's Settings screen.",
                 )
             }
 
-            // 6. Data Security
             item {
                 PrivacySection(
                     icon = Icons.Filled.Lock,
                     title = "6. Data Security",
-                    description = "- All local data is stored in your device's private app storage, inaccessible to other apps.\n" +
-                            "- All network communication uses HTTPS/TLS encryption.\n" +
-                            "- The App enforces a strict network security configuration that blocks cleartext (HTTP) traffic.\n" +
-                            "- We follow OWASP Mobile Security best practices.",
+                    description = "All on-device data is stored in Android's private app storage (inaccessible to other apps). All API requests use HTTPS/TLS encryption. The App's network security configuration prevents cleartext (HTTP) traffic. We follow Android security best practices for data handling.",
                 )
             }
 
-            // 7. Data Retention & Deletion
             item {
                 PrivacySection(
                     icon = Icons.Filled.DeleteForever,
                     title = "7. Data Retention & Deletion",
-                    description = "- All data is stored locally on your device and can be deleted at any time by clearing the App's data or uninstalling the App.\n" +
-                            "- Cached TfL data is automatically refreshed and old entries are purged.\n" +
-                            "- We do not retain any data on remote servers.",
+                    description = "All data is stored locally on your device and is automatically deleted when you uninstall the App. You can also manually clear all cached data and preferences at any time via Settings → Data & Storage → Clear Cache or Reset Preferences. We do not hold any personal data on remote servers.",
                 )
             }
 
-            // 8. Children's Privacy
             item {
                 PrivacySection(
                     icon = Icons.Filled.ChildCare,
                     title = "8. Children's Privacy",
-                    description = "The App is not directed at children under 13. We do not knowingly collect personal information from children. If you believe a child has provided us with data, please contact us and we will take steps to remove it.",
+                    description = "AI Tube Navigator is intended for users aged 13 and over. We do not knowingly collect personal information from children under 13. If you believe a child under 13 has provided us with personal data, please contact us and we will take steps to remove such information.",
                 )
             }
 
-            // 9. International Transfers
             item {
                 PrivacySection(
                     icon = Icons.Filled.Language,
-                    title = "9. International Data",
-                    description = "API requests to TfL and Open-Meteo may be processed on servers outside your country. These requests contain no personal data. No personal information leaves your device.",
+                    title = "9. International Data Transfers",
+                    description = "All personal data (preferences, history) is stored locally on your device and is not transferred internationally. API requests to TfL, OpenWeatherMap, and Google are routed to their respective servers, which may be located outside the UK or EEA. These transfers are governed by each provider's data processing agreements.",
                 )
             }
 
-            // 10. Policy Changes
             item {
                 PrivacySection(
                     icon = Icons.Filled.Update,
                     title = "10. Changes to This Policy",
-                    description = "We may update this Privacy Policy from time to time. Changes will be posted within the App and the \"Effective Date\" above will be updated. Continued use of the App after changes constitutes acceptance of the revised policy.",
+                    description = "We may update this Privacy Policy from time to time. We will notify you of significant changes by updating the \"Effective Date\" above and, where appropriate, displaying an in-app notice. Continued use of the App after changes are posted constitutes your acceptance of the updated policy.",
                 )
             }
 
-            // GDPR Rights Card
             item {
                 Spacer(modifier = Modifier.height(Spacing.md))
                 Card(
@@ -219,38 +191,19 @@ fun PrivacyScreen(onBack: () -> Unit = {}) {
                     colors = CardDefaults.cardColors(containerColor = TubePrimary.copy(alpha = 0.06f)),
                 ) {
                     Column(modifier = Modifier.padding(Spacing.lg)) {
-                        Text("Your Rights Under GDPR", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Text("Your GDPR Rights (if applicable)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(Spacing.sm))
                         Text(
-                            text = "If you are located in the European Economic Area (EEA) or the United Kingdom, you have the following rights under the General Data Protection Regulation:",
+                            text = "Under UK GDPR and the Data Protection Act 2018, UK residents have the right to: access their data, rectify inaccurate data, erase their data (\"right to be forgotten\"), data portability, withdraw consent at any time, object to processing, and lodge a complaint with the Information Commissioner's Office (ICO) at ico.org.uk.\n\nAs all data is stored locally on your device, you can exercise most of these rights directly by clearing app data or uninstalling the App.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp,
                         )
-                        Spacer(modifier = Modifier.height(Spacing.sm))
-                        listOf(
-                            "Right of access — request a copy of your data",
-                            "Right to rectification — correct inaccurate data",
-                            "Right to erasure — delete all stored data",
-                            "Right to data portability — receive data in a portable format",
-                            "Right to withdraw consent — at any time",
-                            "Right to object — to data processing",
-                            "Right to lodge a complaint — with a supervisory authority",
-                        ).forEach { right ->
-                            Text("- $right", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp)
-                        }
                         Spacer(modifier = Modifier.height(Spacing.sm))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                         Spacer(modifier = Modifier.height(Spacing.sm))
                         Text(
-                            text = "Since all data is stored locally on your device, you can exercise these rights by clearing the App's data or uninstalling the App. For any enquiries:",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 18.sp,
-                        )
-                        Spacer(modifier = Modifier.height(Spacing.xs))
-                        Text(
-                            text = "Contact: privacy@aitubenavigator.com",
+                            text = "Contact: privacy@aitubenavigator.app",
                             style = MaterialTheme.typography.labelMedium,
                             color = TubePrimary,
                             fontWeight = FontWeight.SemiBold,
@@ -259,38 +212,10 @@ fun PrivacyScreen(onBack: () -> Unit = {}) {
                 }
             }
 
-            // Google Play Data Safety summary
-            item {
-                Spacer(modifier = Modifier.height(Spacing.md))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = StatusGood.copy(alpha = 0.06f)),
-                ) {
-                    Column(modifier = Modifier.padding(Spacing.lg)) {
-                        Text("Google Play Data Safety Summary", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(Spacing.sm))
-                        listOf(
-                            "No data shared with third parties",
-                            "No personal data collected",
-                            "Location data accessed but not stored",
-                            "Data encrypted in transit (HTTPS)",
-                            "You can request data deletion",
-                        ).forEach { item ->
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-                                Icon(Icons.Filled.Policy, null, tint = StatusGood, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(Spacing.sm))
-                                Text(item, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-            }
-
             item {
                 Spacer(modifier = Modifier.height(Spacing.lg))
                 Text(
-                    text = "Last updated: 1 March 2026 · AI Tube Navigator v1.0.0",
+                    text = "Last updated: 11 April 2026 · AI Tube Navigator v1.0",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

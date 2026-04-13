@@ -5,53 +5,31 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Underground roundel ring (bold, clean) -->
+    <!--
+        London Underground AI roundel — all white, works on any coloured background.
+        Ring:  outer r=30 (x 24..84), inner r=20 (x 34..74), thickness=10dp
+        Bar:   x 17..91, y 47..61 (h=14), stadium-capped ends
+        "AI":  evenOdd cutouts — background colour shows through as letter colour
+               A: outer triangle M43,61 L48,48 L53,61 + crossbar fill-back M45.5,54 L50.5,54 L50.5,56.5 L45.5,56.5
+               I: rectangle M57,48 L64,48 L64,60 L57,60
+    -->
+
+    <!-- Roundel ring — bold white donut -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M54,22C36.33,22 22,36.33 22,54C22,71.67 36.33,86 54,86C71.67,86 86,71.67 86,54C86,36.33 71.67,22 54,22ZM54,80C39.64,80 28,68.36 28,54C28,39.64 39.64,28 54,28C68.36,28 80,39.64 80,54C80,68.36 68.36,80 54,80Z"/>
+        android:fillType="evenOdd"
+        android:pathData="
+            M84,54 A30,30 0 1 1 83.999,54 Z
+            M74,54 A20,20 0 1 1 73.999,54 Z"/>
 
-    <!-- Horizontal bar (bold, rounded) -->
+    <!-- Stadium bar with AI cutout via evenOdd -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M24,49C24,47.34 25.34,46 27,46L81,46C82.66,46 84,47.34 84,49L84,59C84,60.66 82.66,62 81,62L27,62C25.34,62 24,60.66 24,59Z"/>
+        android:fillType="evenOdd"
+        android:pathData="
+            M17,47 L91,47 Q97,47 97,54 Q97,61 91,61 L17,61 Q11,61 11,54 Q11,47 17,47 Z
+            M43,61 L48,48 L53,61 Z
+            M45.5,54 L50.5,54 L50.5,56.5 L45.5,56.5 Z
+            M57,48 L64,48 L64,60 L57,60 Z"/>
 
-    <!-- "AI" text bold and large — A letter -->
-    <path
-        android:fillColor="#003688"
-        android:pathData="M40.5,49L36,59L38.5,59L39.3,57L44.7,57L45.5,59L48,59L43.5,49ZM40.1,55.2L42,50.8L43.9,55.2Z"/>
-
-    <!-- "AI" text bold and large — I letter -->
-    <path
-        android:fillColor="#003688"
-        android:pathData="M50,49L52.5,49L52.5,59L50,59Z"/>
-
-    <!-- Circuit / AI node: top center -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.9"
-        android:pathData="M54,34m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0"/>
-
-    <!-- Circuit nodes: left and right -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.7"
-        android:pathData="M42,38m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"/>
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.7"
-        android:pathData="M66,38m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"/>
-
-    <!-- Circuit connections -->
-    <path
-        android:strokeWidth="1.5"
-        android:strokeColor="#FFFFFF"
-        android:strokeAlpha="0.5"
-        android:strokeLineCap="round"
-        android:pathData="M54,34L42,38M54,34L66,38"/>
-
-    <!-- Train silhouette below bar -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.85"
-        android:pathData="M48,66L60,66C61.66,66 63,67.34 63,69L63,73C63,74.1 62.1,75 61,75L47,75C45.9,75 45,74.1 45,73L45,69C45,67.34 46.34,66 48,66ZM49,71.5C49,72.33 49.67,73 50.5,73C51.33,73 52,72.33 52,71.5C52,70.67 51.33,70 50.5,70C49.67,70 49,70.67 49,71.5ZM56,71.5C56,72.33 56.67,73 57.5,73C58.33,73 59,72.33 59,71.5C59,70.67 58.33,70 57.5,70C56.67,70 56,70.67 56,71.5ZM48,67.5L60,67.5L60,69.5L48,69.5Z"/>
 </vector>

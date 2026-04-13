@@ -53,17 +53,19 @@ import kotlinx.coroutines.delay
 @Composable
 fun AnimatedSplashScreen(
     onSplashComplete: () -> Unit,
+    iconGradientStart: Color = Color(0xFF0A1628),
+    iconGradientEnd: Color = TubePrimary,
 ) {
     var animationPhase by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
-        delay(200)
+        delay(100)
         animationPhase = 1          // roundel draws in
-        delay(500)
-        animationPhase = 2          // text fades in
         delay(400)
+        animationPhase = 2          // text fades in
+        delay(300)
         animationPhase = 3          // loading dots
-        delay(600)
+        delay(400)
         onSplashComplete()
     }
 
@@ -102,9 +104,16 @@ fun AnimatedSplashScreen(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF0A1628),
-                        Color(0xFF0D2240),
-                        TubePrimary.copy(alpha = 0.9f),
+                        iconGradientStart,
+                        iconGradientStart.copy(alpha = 0.85f).let {
+                            Color(
+                                red = (it.red + iconGradientEnd.red) / 2f,
+                                green = (it.green + iconGradientEnd.green) / 2f,
+                                blue = (it.blue + iconGradientEnd.blue) / 2f,
+                                alpha = 1f,
+                            )
+                        },
+                        iconGradientEnd.copy(alpha = 0.92f),
                     ),
                 ),
             ),
@@ -166,9 +175,9 @@ fun AnimatedSplashScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // App name
+            // ── App title ────────────────────────────────────────
             Text(
-                text = "AI Tube Navigator",
+                text = "London Tube AI",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,

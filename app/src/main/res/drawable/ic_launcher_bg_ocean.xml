@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Deep ocean – dark top to teal bottom -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="54" android:startY="0" android:endX="54" android:endY="108" android:type="linear">
+                <item android:offset="0.0" android:color="#FF000E20" />
+                <item android:offset="0.5" android:color="#FF003858" />
+                <item android:offset="1.0" android:color="#FF006898" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Concentric ripple arcs centred at (54,108) — bottom edge -->
+    <path android:strokeColor="#40B8FF" android:strokeAlpha="0.28" android:strokeWidth="1.5"
+        android:pathData="M30,108a24,24 0 0 1 48,0"/>
+    <path android:strokeColor="#40B8FF" android:strokeAlpha="0.22" android:strokeWidth="1.2"
+        android:pathData="M16,108a38,38 0 0 1 76,0"/>
+    <path android:strokeColor="#40B8FF" android:strokeAlpha="0.16" android:strokeWidth="1.0"
+        android:pathData="M2,108a52,52 0 0 1 104,0"/>
+    <path android:strokeColor="#40B8FF" android:strokeAlpha="0.11" android:strokeWidth="0.8"
+        android:pathData="M-12,108a66,66 0 0 1 132,0"/>
+    <path android:strokeColor="#40B8FF" android:strokeAlpha="0.07" android:strokeWidth="0.6"
+        android:pathData="M-26,108a80,80 0 0 1 160,0"/>
+
+    <!-- Wave highlights near top -->
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.12" android:strokeWidth="1.0"
+        android:pathData="M0,30Q27,22 54,28Q81,22 108,28"/>
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.07" android:strokeWidth="0.8"
+        android:pathData="M0,18Q27,12 54,18Q81,12 108,18"/>
+
+    <!-- Bubble dots -->
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.18"
+        android:pathData="M17,45a2,2 0 1 0 4,0a2,2 0 1 0 -4,0
+            M42,30a1.5,1.5 0 1 0 3,0a1.5,1.5 0 1 0 -3,0
+            M72,40a1.5,1.5 0 1 0 3,0a1.5,1.5 0 1 0 -3,0
+            M88,20a2,2 0 1 0 4,0a2,2 0 1 0 -4,0
+            M60,55a1.2,1.2 0 1 0 2.4,0a1.2,1.2 0 1 0 -2.4,0
+            M29,65a1.2,1.2 0 1 0 2.4,0a1.2,1.2 0 1 0 -2.4,0
+            M8,55a1.0,1.0 0 1 0 2,0a1.0,1.0 0 1 0 -2,0"/>
+
+</vector>

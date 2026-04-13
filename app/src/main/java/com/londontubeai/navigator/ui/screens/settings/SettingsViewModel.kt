@@ -12,8 +12,11 @@ import com.londontubeai.navigator.data.local.dao.TubeDao
 import com.londontubeai.navigator.data.model.TubeData
 import com.londontubeai.navigator.data.notifications.DisruptionCheckWorker
 import com.londontubeai.navigator.data.preferences.AppPreferences
+import com.londontubeai.navigator.ui.appicon.AppIconManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import java.util.concurrent.TimeUnit
@@ -51,7 +54,16 @@ class SettingsViewModel @Inject constructor(
     private val prefs: AppPreferences,
     private val dao: TubeDao,
     private val app: Application,
+    private val iconManager: AppIconManager,
 ) : ViewModel() {
+
+    private val _currentIconId = MutableStateFlow(iconManager.getCurrentIconId())
+    val currentIconId = _currentIconId.asStateFlow()
+
+    fun setIcon(id: String) {
+        iconManager.setIcon(id)
+        _currentIconId.value = id
+    }
 
     // Combine flows in groups of ≤5 (Kotlin combine limit), then merge
     val prefsState = combine(
@@ -153,6 +165,7 @@ class SettingsViewModel @Inject constructor(
     suspend fun setQuietHours(v: Boolean) = prefs.setQuietHours(v)
     // Appearance
     suspend fun setDarkMode(v: String) = prefs.setDarkMode(v)
+
     suspend fun setHighContrast(v: Boolean) = prefs.setHighContrast(v)
     suspend fun setLargeText(v: Boolean) = prefs.setLargeText(v)
     // Location

@@ -13,6 +13,10 @@ data class SavedJourneyEntity(
     val toStationName: String,
     val timestamp: Long = System.currentTimeMillis(),
     val isFavourite: Boolean = false,
+    val fromLat: Double = 0.0,
+    val fromLng: Double = 0.0,
+    val toLat: Double = 0.0,
+    val toLng: Double = 0.0,
 )
 
 @Entity(tableName = "cached_line_status")

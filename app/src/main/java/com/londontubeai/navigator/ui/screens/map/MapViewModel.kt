@@ -31,6 +31,8 @@ data class MapUiState(
     val arrivalsError: Boolean = false,
     val lineStatuses: List<LineStatus> = emptyList(),
     val isLoadingStatuses: Boolean = false,
+    val nearbyArrivals: Map<String, StationArrivals> = emptyMap(),
+    val nearbyArrivalsUpdatedAt: Long = 0L,
 )
 
 @HiltViewModel
@@ -44,12 +46,18 @@ class MapViewModel @Inject constructor(
     private var arrivalsJob: Job? = null
 
     companion object {
-        private const val ARRIVALS_REFRESH_MS = 30_000L
+        private const val ARRIVALS_REFRESH_MS = 15_000L
     }
 
     init {
         loadCurrentLocation()
         loadLineStatuses()
+        viewModelScope.launch {
+            while (true) {
+                delay(ARRIVALS_REFRESH_MS)
+                loadNearbyArrivals()
+            }
+        }
     }
 
     fun loadLineStatuses() {
@@ -72,21 +80,18 @@ class MapViewModel @Inject constructor(
         viewModelScope.launch {
             locationService.getCurrentLocation()
                 .onSuccess { location ->
-                    val nearestStation = TubeData.getAllStationsSorted()
-                        .minByOrNull {
-                            locationService.calculateDistance(
-                                location.latitude,
-                                location.longitude,
-                                it.latitude,
-                                it.longitude,
-                            )
-                        }
+                    val allStations = TubeData.getAllStationsSorted()
+                    val sorted = allStations.sortedBy {
+                        locationService.calculateDistance(
+                            location.latitude, location.longitude,
+                            it.latitude, it.longitude,
+                        )
+                    }
+                    val nearestStation = sorted.firstOrNull()
                     val nearestDistance = nearestStation?.let {
                         locationService.calculateDistance(
-                            location.latitude,
-                            location.longitude,
-                            it.latitude,
-                            it.longitude,
+                            location.latitude, location.longitude,
+                            it.latitude, it.longitude,
                         )
                     }
                     _uiState.value = _uiState.value.copy(
@@ -95,7 +100,29 @@ class MapViewModel @Inject constructor(
                         nearestStationId = nearestStation?.id,
                         nearestStationDistanceKm = nearestDistance,
                     )
+                    loadNearbyArrivals()
                 }
+        }
+    }
+
+    fun loadNearbyArrivals() {
+        val state = _uiState.value
+        val userLat = state.userLat ?: return
+        val userLng = state.userLng ?: return
+        viewModelScope.launch {
+            val nearest = TubeData.getAllStationsSorted()
+                .filter { NaptanIds.forStation(it.id) != null }
+                .sortedBy { locationService.calculateDistance(userLat, userLng, it.latitude, it.longitude) }
+                .take(5)
+            val results = mutableMapOf<String, StationArrivals>()
+            nearest.forEach { station ->
+                repository.fetchStationArrivals(station.id)
+                    .onSuccess { arrivals -> results[station.id] = arrivals }
+            }
+            _uiState.value = _uiState.value.copy(
+                nearbyArrivals = results,
+                nearbyArrivalsUpdatedAt = System.currentTimeMillis(),
+            )
         }
     }
 
@@ -142,6 +169,12 @@ class MapViewModel @Inject constructor(
     fun loadJourney(fromId: String?, toId: String?) {
         if (fromId.isNullOrBlank() || toId.isNullOrBlank()) {
             _uiState.value = _uiState.value.copy(journeyRoute = null)
+            return
+        }
+        // Use the cached route from RouteScreen first (avoids re-fetching and works for place: IDs)
+        val cached = repository.getLastJourneyRoute(fromId, toId)
+        if (cached != null) {
+            _uiState.value = _uiState.value.copy(journeyRoute = cached)
             return
         }
         viewModelScope.launch {

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="0" android:startY="0" android:endX="108" android:endY="108" android:type="linear">
+                <item android:offset="0.0" android:color="#FF1A0038" />
+                <item android:offset="0.5" android:color="#FF4A2880" />
+                <item android:offset="1.0" android:color="#FF6848A0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Large faint centre diamond -->
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.05"
+        android:pathData="M54,16L76,54L54,92L32,54Z"/>
+    <!-- Medium corner diamonds -->
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.10"
+        android:pathData="M16,22L24,30L16,38L8,30Z
+            M88,20L96,28L88,36L80,28Z
+            M20,78L28,86L20,94L12,86Z
+            M88,78L96,86L88,94L80,86Z"/>
+    <!-- Small sparkle diamonds -->
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.22"
+        android:pathData="M45,13L49,17L45,21L41,17Z
+            M65,89L69,93L65,97L61,93Z
+            M9,50L13,54L9,58L5,54Z
+            M97,50L101,54L97,58L93,54Z"/>
+    <!-- Tiny glitter dots -->
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.55"
+        android:pathData="M32,40a1.5,1.5 0 1 0 3,0a1.5,1.5 0 1 0 -3,0
+            M74,38a1.5,1.5 0 1 0 3,0a1.5,1.5 0 1 0 -3,0
+            M36,72a1.2,1.2 0 1 0 2.4,0a1.2,1.2 0 1 0 -2.4,0
+            M70,72a1.2,1.2 0 1 0 2.4,0a1.2,1.2 0 1 0 -2.4,0
+            M54,40a1.0,1.0 0 1 0 2,0a1.0,1.0 0 1 0 -2,0"/>
+
+</vector>

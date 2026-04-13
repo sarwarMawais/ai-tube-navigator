@@ -170,17 +170,21 @@ class HomeViewModel @Inject constructor(
             locationService.getCurrentLocation()
                 .onSuccess { location ->
                     try {
+                        Log.d("Weather", "Getting weather for lat: ${location.latitude}, lng: ${location.longitude}")
                         val response = weatherApi.getCurrentWeather(
                             latitude = location.latitude,
                             longitude = location.longitude,
                         )
+                        Log.d("Weather", "API response: temp=${response.current.temperature}, code=${response.current.weatherCode}")
                         val impact = mapWeatherCodeToImpact(response.current.weatherCode)
                         val condition = mapWeatherCodeToCondition(response.current.weatherCode)
+                        val icon = mapWeatherCodeToIcon(response.current.weatherCode)
+                        Log.d("Weather", "Mapped: condition=$condition, icon=$icon, impact=$impact")
                         _uiState.value = _uiState.value.copy(
                             weatherInfo = WeatherInfo(
                                 temperature = response.current.temperature.toInt(),
                                 condition = condition,
-                                icon = "01d", // OpenMeteo doesn't provide icons
+                                icon = icon,
                                 impactLevel = impact,
                             )
                         )
@@ -191,16 +195,20 @@ class HomeViewModel @Inject constructor(
                     }
                     // Fallback: use London coords
                     try {
+                        Log.d("Weather", "Using fallback London coords")
                         val response = weatherApi.getCurrentWeather(
                             latitude = 51.5074, longitude = -0.1278,
                         )
+                        Log.d("Weather", "Fallback API response: temp=${response.current.temperature}, code=${response.current.weatherCode}")
                         val impact = mapWeatherCodeToImpact(response.current.weatherCode)
                         val condition = mapWeatherCodeToCondition(response.current.weatherCode)
+                        val icon = mapWeatherCodeToIcon(response.current.weatherCode)
+                        Log.d("Weather", "Fallback mapped: condition=$condition, icon=$icon, impact=$impact")
                         _uiState.value = _uiState.value.copy(
                             weatherInfo = WeatherInfo(
                                 temperature = response.current.temperature.toInt(),
                                 condition = condition,
-                                icon = "01d",
+                                icon = icon,
                                 impactLevel = impact,
                             )
                         )
@@ -209,6 +217,7 @@ class HomeViewModel @Inject constructor(
                     } catch (e: Exception) {
                         Log.e("Weather", "Fallback API call failed: ${e.message}")
                     }
+                    Log.d("Weather", "Using hardcoded fallback weather")
                     setFallbackWeather()
                 }
                 .onFailure {
@@ -219,7 +228,7 @@ class HomeViewModel @Inject constructor(
 
     private fun mapWeatherCodeToCondition(code: Int): String = when (code) {
         0, 1 -> "Clear"
-        2, 3 -> "Cloudy"
+        2, 3 -> "Partly Cloudy"
         45, 48 -> "Fog"
         51, 53, 55, 56, 57 -> "Drizzle"
         61, 63, 65, 66, 67 -> "Rain"
@@ -227,6 +236,22 @@ class HomeViewModel @Inject constructor(
         80, 81, 82 -> "Showers"
         95, 96, 99 -> "Thunderstorm"
         else -> "Clear"
+    }
+
+    private fun mapWeatherCodeToIcon(code: Int): String = when (code) {
+        0, 1 -> "01d"  // Clear
+        2, 3 -> "02d"  // Partly cloudy
+        45, 48 -> "50d" // Fog
+        51, 53, 55 -> "09d" // Drizzle
+        56, 57 -> "13d" // Freezing drizzle
+        61, 63 -> "10d" // Rain light
+        65, 66, 67 -> "10d" // Rain heavy
+        71, 73 -> "13d" // Snow light
+        75, 77, 85, 86 -> "13d" // Snow heavy
+        80, 81 -> "09d" // Rain showers
+        82 -> "11d" // Thunderstorm showers
+        95, 96, 99 -> "11d" // Thunderstorm
+        else -> "01d"
     }
 
     private fun setFallbackWeather() {
@@ -492,8 +517,8 @@ class HomeViewModel @Inject constructor(
         private const val LONDON_LAT_MAX = 51.69
         private const val LONDON_LON_MIN = -0.51
         private const val LONDON_LON_MAX = 0.33
-        // Max distance to nearest station to show arrivals (km)
-        private const val MAX_NEARBY_DISTANCE_KM = 3.0
+        // Max distance to nearest station to show arrivals (km) — ~3 miles
+        private const val MAX_NEARBY_DISTANCE_KM = 4.8
     }
 
     private fun isInLondon(latitude: Double, longitude: Double): Boolean {

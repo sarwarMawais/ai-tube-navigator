@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Winter blue gradient -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="54" android:startY="0" android:endX="54" android:endY="108" android:type="linear">
+                <item android:offset="0.0" android:color="#FF001830" />
+                <item android:offset="0.5" android:color="#FF003860" />
+                <item android:offset="1.0" android:color="#FF005580" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Snow mound layers at bottom -->
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.22"
+        android:pathData="M0,95Q20,82 40,88Q54,92 68,86Q88,78 108,88L108,108L0,108Z"/>
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.14"
+        android:pathData="M0,102Q27,96 54,99Q81,96 108,103L108,108L0,108Z"/>
+
+    <!-- Snowflakes (6-arm asterisk using strokes) -->
+    <!-- Large snowflake at (22,22) -->
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.80" android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M22,16L22,28 M16,22L28,22 M17.76,17.76L26.24,26.24 M26.24,17.76L17.76,26.24"/>
+    <!-- Snowflake at (82,26) -->
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.72" android:strokeWidth="1.3"
+        android:strokeLineCap="round"
+        android:pathData="M82,20L82,32 M76,26L88,26 M78.24,22.24L85.76,29.76 M85.76,22.24L78.24,29.76"/>
+    <!-- Snowflake at (15,60) -->
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.68" android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:pathData="M15,55L15,65 M10,60L20,60 M11.46,56.46L18.54,63.54 M18.54,56.46L11.46,63.54"/>
+    <!-- Snowflake at (90,60) -->
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.68" android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:pathData="M90,55L90,65 M85,60L95,60 M86.46,56.46L93.54,63.54 M93.54,56.46L86.46,63.54"/>
+    <!-- Small snowflake at (48,15) -->
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.60" android:strokeWidth="1.0"
+        android:strokeLineCap="round"
+        android:pathData="M48,11L48,19 M44,15L52,15 M45.17,12.17L50.83,17.83 M50.83,12.17L45.17,17.83"/>
+    <!-- Small snowflake at (68,40) -->
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.55" android:strokeWidth="1.0"
+        android:strokeLineCap="round"
+        android:pathData="M68,37L68,43 M65,40L71,40 M65.88,37.88L70.12,42.12 M70.12,37.88L65.88,42.12"/>
+    <!-- Small snowflake at (35,76) -->
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.60" android:strokeWidth="1.0"
+        android:strokeLineCap="round"
+        android:pathData="M35,72L35,80 M31,76L39,76 M32.17,73.17L37.83,78.83 M37.83,73.17L32.17,78.83"/>
+
+    <!-- Scattered snow dots -->
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.42"
+        android:pathData="M55,35a1.5,1.5 0 1 0 3,0a1.5,1.5 0 1 0 -3,0
+            M97,40a1.2,1.2 0 1 0 2.4,0a1.2,1.2 0 1 0 -2.4,0
+            M8,38a1,1 0 1 0 2,0a1,1 0 1 0 -2,0
+            M62,78a1.3,1.3 0 1 0 2.6,0a1.3,1.3 0 1 0 -2.6,0
+            M30,48a1,1 0 1 0 2,0a1,1 0 1 0 -2,0
+            M76,12a1.1,1.1 0 1 0 2.2,0a1.1,1.1 0 1 0 -2.2,0"/>
+
+</vector>

@@ -8,12 +8,15 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.londontubeai.navigator.data.network.NetworkMonitor
 import com.londontubeai.navigator.data.preferences.AppPreferences
 import com.londontubeai.navigator.navigation.AppNavigation
+import com.londontubeai.navigator.ui.appicon.AppIconManager
 import com.londontubeai.navigator.ui.theme.AiTubeNavigatorTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
@@ -25,6 +28,7 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var networkMonitor: NetworkMonitor
     @Inject lateinit var appPreferences: AppPreferences
+    @Inject lateinit var iconManager: AppIconManager
 
     private var isReady by mutableStateOf(false)
     private var showOnboarding by mutableStateOf(false)
@@ -53,6 +57,11 @@ class MainActivity : ComponentActivity() {
                 else -> isSystemDark
             }
 
+            val iconOption = remember(iconManager) {
+                val id = iconManager.getCurrentIconId()
+                AppIconManager.ALL_ICONS.find { it.id == id } ?: AppIconManager.ALL_ICONS.first()
+            }
+
             AiTubeNavigatorTheme(
                 darkTheme = useDarkTheme,
                 highContrast = highContrast,
@@ -63,6 +72,8 @@ class MainActivity : ComponentActivity() {
                         networkMonitor = networkMonitor,
                         startOnboarding = showOnboarding,
                         appPreferences = appPreferences,
+                        iconGradientStart = Color(iconOption.gradientStart),
+                        iconGradientEnd = Color(iconOption.gradientEnd),
                     )
                 }
             }

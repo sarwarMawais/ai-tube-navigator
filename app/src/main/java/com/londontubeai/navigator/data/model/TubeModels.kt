@@ -179,6 +179,8 @@ data class JourneyRoute(
     val crowdPrediction: CrowdPrediction? = null,
     val calorieBurned: Int = 0,
     val co2SavedGrams: Int = 0,
+    val estimatedFarePounds: Double? = null,
+    val isStepFreeRoute: Boolean = false,
 )
 
 data class JourneyLeg(
@@ -197,6 +199,7 @@ data class JourneyLeg(
     val busAlightStopName: String = "",
     val nextDepartureMinutes: Int = 0,
     val platformNumber: String = "",
+    val polylinePoints: List<Pair<Double, Double>> = emptyList(),
 )
 
 data class AiInsight(
@@ -436,6 +439,7 @@ data class StationArrivals(
     val stationName: String,
     val arrivals: List<LiveArrival>,
     val lastUpdated: Long = System.currentTimeMillis(),
+    val isCached: Boolean = false,
 ) {
     val byLine: Map<String, List<LiveArrival>> get() = arrivals.groupBy { it.lineId }
     val nextTrain: LiveArrival? get() = arrivals.minByOrNull { it.timeToStationSeconds }

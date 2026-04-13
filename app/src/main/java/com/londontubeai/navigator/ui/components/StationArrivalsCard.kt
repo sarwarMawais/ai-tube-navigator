@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.DirectionsSubway
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.londontubeai.navigator.data.model.LiveArrival
 import com.londontubeai.navigator.data.model.StationArrivals
+import com.londontubeai.navigator.ui.theme.StatusMinor
 import com.londontubeai.navigator.ui.theme.TubePrimary
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -77,15 +79,32 @@ fun StationArrivalsCard(
                         Icon(
                             Icons.Filled.DirectionsSubway,
                             contentDescription = null,
-                            tint = TubePrimary,
+                            tint = if (arrivals.isCached) StatusMinor else TubePrimary,
                             modifier = Modifier.size(20.dp),
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Live Arrivals",
+                            text = if (arrivals.isCached) "Cached Arrivals" else "Live Arrivals",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
+                            color = if (arrivals.isCached) StatusMinor else Color.Unspecified,
                         )
+                        if (arrivals.isCached) {
+                            Spacer(Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = StatusMinor.copy(alpha = 0.12f),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(Icons.Filled.Info, null, tint = StatusMinor, modifier = Modifier.size(10.dp))
+                                    Spacer(Modifier.width(3.dp))
+                                    Text("Offline", style = MaterialTheme.typography.labelSmall, color = StatusMinor, fontSize = 10.sp)
+                                }
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(

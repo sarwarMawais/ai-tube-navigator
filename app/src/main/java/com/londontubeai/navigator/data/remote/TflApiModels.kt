@@ -33,9 +33,24 @@ data class TflJourneyResponse(
     @SerializedName("journeys") val journeys: List<TflJourney>?,
 )
 
+data class TflJourneyFare(
+    @SerializedName("totalCost") val totalCost: Int?,
+    @SerializedName("fares") val fares: List<TflFareDetail>?,
+)
+
+data class TflFareDetail(
+    @SerializedName("lowZone") val lowZone: Int?,
+    @SerializedName("highZone") val highZone: Int?,
+    @SerializedName("cost") val cost: Int?,
+    @SerializedName("chargeProfileName") val chargeProfileName: String?,
+    @SerializedName("chargeLevel") val chargeLevel: String?,
+    @SerializedName("isHopperFare") val isHopperFare: Boolean?,
+)
+
 data class TflJourney(
     @SerializedName("duration") val duration: Int,
     @SerializedName("legs") val legs: List<TflJourneyLeg>,
+    @SerializedName("fare") val fare: TflJourneyFare? = null,
 )
 
 data class TflJourneyLeg(
@@ -56,11 +71,14 @@ data class TflInstruction(
 data class TflPoint(
     @SerializedName("naptanId") val naptanId: String?,
     @SerializedName("commonName") val commonName: String?,
+    @SerializedName("indicator") val indicator: String?,
+    @SerializedName("stopLetter") val stopLetter: String?,
     @SerializedName("lat") val lat: Double?,
     @SerializedName("lon") val lon: Double?,
 )
 
 data class TflPath(
+    @SerializedName("lineString") val lineString: String?,
     @SerializedName("stopPoints") val stopPoints: List<TflPoint>?,
 )
 

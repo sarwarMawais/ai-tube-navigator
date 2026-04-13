@@ -40,9 +40,19 @@ object AppModule {
 
         return OkHttpClient.Builder()
             .addInterceptor(logging)
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                val original = chain.request()
+                val appKey = BuildConfig.TFL_APP_KEY
+                val url = if (appKey.isNotBlank()) {
+                    original.url.newBuilder()
+                        .addQueryParameter("app_key", appKey)
+                        .build()
+                } else original.url
+                chain.proceed(original.newBuilder().url(url).build())
+            }
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
             .build()
     }
 
@@ -60,7 +70,11 @@ object AppModule {
     @Provides
     @Singleton
     @WeatherRetrofit
-    fun provideWeatherRetrofit(client: OkHttpClient): Retrofit {
+    fun provideWeatherRetrofit(): Retrofit {
+        val client = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build()
         return Retrofit.Builder()
             .baseUrl("https://api.open-meteo.com/v1/")
             .client(client)

@@ -56,8 +56,8 @@ class NearbyDetailViewModel @Inject constructor(
     private val locationService: LocationService,
 ) : ViewModel() {
 
-    private val nearbyRadiusKm = 2.8
-    private val maxNearbyStations = 8
+    private val nearbyRadiusKm = 4.8
+    private val maxNearbyStations = 12
     private val busStopRadiusMeters = 250
 
     private val _uiState = MutableStateFlow(NearbyDetailUiState())

@@ -31,6 +31,10 @@ android {
         // OpenWeatherMap API Key (set in local.properties as WEATHER_API_KEY=your_key)
         val weatherApiKey = localProperties.asText.map { it.split("\n").find { it.startsWith("WEATHER_API_KEY=") }?.substringAfter("=")?.trim() ?: "" }.get()
         buildConfigField("String", "WEATHER_API_KEY", "\"$weatherApiKey\"")
+
+        // TfL API Key (optional, set in local.properties as TFL_APP_KEY=your_key for higher rate limits)
+        val tflAppKey = localProperties.asText.map { it.split("\n").find { it.startsWith("TFL_APP_KEY=") }?.substringAfter("=")?.trim() ?: "" }.get()
+        buildConfigField("String", "TFL_APP_KEY", "\"$tflAppKey\"")
     }
 
     buildTypes {
@@ -122,6 +126,9 @@ dependencies {
     // Google Play Billing
     implementation(libs.billing)
 
+    // Google Play In-App Review
+    implementation(libs.play.review)
+
     // Splash Screen
     implementation(libs.splashscreen)
 
@@ -132,6 +139,8 @@ dependencies {
 
     // Testing
     testImplementation(libs.junit)
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("io.mockk:mockk:1.13.12")
     androidTestImplementation(libs.androidx.test.ext)
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.ui.test)

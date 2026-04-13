@@ -11,11 +11,11 @@ import com.londontubeai.navigator.data.model.TubeData
 import com.londontubeai.navigator.data.preferences.AppPreferences
 import com.londontubeai.navigator.data.repository.TubeRepository
 import com.londontubeai.navigator.ml.CrowdPredictionEngine
+import com.londontubeai.navigator.utils.AppReviewManager
 import com.londontubeai.navigator.utils.LocationService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,7 +23,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Locale
 import javax.inject.Inject
 
 data class NearbyBusRoute(
@@ -104,6 +106,7 @@ class RouteViewModel @Inject constructor(
     private val repository: TubeRepository,
     private val prefs: AppPreferences,
     private val locationService: LocationService,
+    val reviewManager: AppReviewManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RouteUiState())
@@ -124,7 +127,7 @@ class RouteViewModel @Inject constructor(
                 .onSuccess { location ->
                     val lat = location.latitude
                     val lng = location.longitude
-                    val inLondon = lat in 51.28..51.69 && lng in -0.51..0.33
+                    val inLondon = lat in 51.28..51.75 && lng in -0.65..0.40
 
                     // Always find nearest station (even outside London) for display purposes
                     val nearestStation = TubeData.getAllStationsSorted()
@@ -161,6 +164,7 @@ class RouteViewModel @Inject constructor(
                         locationChecked = true,
                         isInsideLondon = false,
                         isResolvingLocation = false,
+                        fromIsAutoLocation = false,
                     )
                 }
         }
@@ -319,7 +323,7 @@ class RouteViewModel @Inject constructor(
                 ?: if (current.fromIsAutoLocation && current.userLat != null && current.userLng != null) {
                     Station(
                         id = "place:my-location",
-                        name = current.nearestStationName ?: "My Location",
+                        name = "My Location",
                         lineIds = emptyList(),
                         zone = "",
                         latitude = current.userLat,
@@ -370,6 +374,7 @@ class RouteViewModel @Inject constructor(
         val selected = options[index]
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         val dayType = _uiState.value.selectedCrowdDayType
+        repository.cacheRoute(selected.route)
         _uiState.value = _uiState.value.copy(
             selectedRouteIndex = index,
             journeyRoute = selected.route,
@@ -392,6 +397,7 @@ class RouteViewModel @Inject constructor(
             departureOption = option,
             showDepartureOptions = false,
         )
+        if (option == DepartureOption.LEAVE_NOW) tryCalculateRoute()
     }
 
     fun toggleDepartureOptions() {
@@ -444,21 +450,36 @@ class RouteViewModel @Inject constructor(
 
     fun selectRecentJourney(journey: SavedJourneyEntity) {
         val from = TubeData.getStationById(journey.fromStationId)
-        val to = TubeData.getStationById(journey.toStationId)
-        if (from != null && to != null) {
-            _uiState.value = _uiState.value.copy(
-                fromStation = from,
-                toStation = to,
-                fromQuery = from.name,
-                toQuery = to.name,
-                fromSuggestions = emptyList(),
-                toSuggestions = emptyList(),
-                isSearchingFrom = false,
-                isSearchingTo = false,
-                routeCalculated = false,
+            ?: Station(
+                id = journey.fromStationId,
+                name = journey.fromStationName,
+                lineIds = emptyList(),
+                zone = "",
+                latitude = journey.fromLat,
+                longitude = journey.fromLng,
             )
-            tryCalculateRoute()
-        }
+        val to = TubeData.getStationById(journey.toStationId)
+            ?: Station(
+                id = journey.toStationId,
+                name = journey.toStationName,
+                lineIds = emptyList(),
+                zone = "",
+                latitude = journey.toLat,
+                longitude = journey.toLng,
+            )
+        _uiState.value = _uiState.value.copy(
+            fromStation = from,
+            toStation = to,
+            fromQuery = from.name,
+            toQuery = to.name,
+            fromSuggestions = emptyList(),
+            toSuggestions = emptyList(),
+            isSearchingFrom = false,
+            isSearchingTo = false,
+            fromIsAutoLocation = false,
+            routeCalculated = false,
+        )
+        tryCalculateRoute()
     }
 
     private fun tryCalculateRoute() {
@@ -484,60 +505,71 @@ class RouteViewModel @Inject constructor(
             val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
             val selectedCrowdDayType = _uiState.value.selectedCrowdDayType
 
-            val toIsPlace = to.id.startsWith("place:")
+            // Build TfL date/time/timeIs params from selected departure option
+            val cal = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, state.currentHour)
+                set(Calendar.MINUTE, state.currentMinute)
+            }
+            val tflDate = when (state.departureOption) {
+                DepartureOption.LEAVE_NOW -> null
+                else -> SimpleDateFormat("yyyyMMdd", Locale.UK).format(cal.time)
+            }
+            val tflTime = when (state.departureOption) {
+                DepartureOption.LEAVE_NOW -> null
+                else -> "%02d%02d".format(state.currentHour, state.currentMinute)
+            }
+            val tflTimeIs = when (state.departureOption) {
+                DepartureOption.ARRIVE_BY -> "arriving"
+                DepartureOption.DEPART_AT -> "departing"
+                else -> null
+            }
 
-            // Fetch multiple journeys from TfL in parallel:
-            // 1) All journeys from "leasttime" (TfL returns 3-5 options)
-            // 2) Best journey from "leastinterchange" for variety
+            val toIsPlace = to.id.startsWith("place:")
+            val fromIsPlace = from != null && from.id.startsWith("place:") && from.latitude != 0.0
+
+            // Single TfL API call — TfL returns 3-5 options per request, no need for a second call
             val allRoutes = mutableListOf<JourneyRoute>()
+            val tflPref = state.selectedPreference.name  // FASTEST, FEWEST_CHANGES, LEAST_WALKING, STEP_FREE
 
             val tflFastest = async {
-                if (useCoords) {
-                    repository.fetchAllJourneyRoutesFromTfl(
-                        fromStationId = "my-location", toStationId = to.id, preference = "FASTEST",
+                when {
+                    useCoords -> repository.fetchAllJourneyRoutesFromTfl(
+                        fromStationId = "my-location", toStationId = to.id, preference = tflPref,
                         fromLat = lat, fromLng = lng,
                         toLat = if (toIsPlace) to.latitude else null,
                         toLng = if (toIsPlace) to.longitude else null,
                         toDisplayName = if (toIsPlace) to.name else null,
+                        departureDate = tflDate, departureTime = tflTime, timeIs = tflTimeIs,
                     ).getOrDefault(emptyList())
-                } else {
-                    repository.fetchAllJourneyRoutesFromTfl(
-                        fromStationId = from!!.id, toStationId = to.id, preference = "FASTEST",
+                    fromIsPlace -> repository.fetchAllJourneyRoutesFromTfl(
+                        fromStationId = "my-location", toStationId = to.id, preference = tflPref,
+                        fromLat = from!!.latitude, fromLng = from.longitude,
                         toLat = if (toIsPlace) to.latitude else null,
                         toLng = if (toIsPlace) to.longitude else null,
                         toDisplayName = if (toIsPlace) to.name else null,
+                        departureDate = tflDate, departureTime = tflTime, timeIs = tflTimeIs,
                     ).getOrDefault(emptyList())
-                }
-            }
-            val tflFewest = async {
-                if (useCoords) {
-                    repository.fetchJourneyRouteFromTfl(
-                        fromStationId = "my-location", toStationId = to.id, preference = "FEWEST_CHANGES",
-                        fromLat = lat, fromLng = lng,
+                    else -> repository.fetchAllJourneyRoutesFromTfl(
+                        fromStationId = from!!.id, toStationId = to.id, preference = tflPref,
                         toLat = if (toIsPlace) to.latitude else null,
                         toLng = if (toIsPlace) to.longitude else null,
                         toDisplayName = if (toIsPlace) to.name else null,
-                    ).getOrNull()
-                } else {
-                    repository.fetchJourneyRouteFromTfl(
-                        fromStationId = from!!.id, toStationId = to.id, preference = "FEWEST_CHANGES",
-                        toLat = if (toIsPlace) to.latitude else null,
-                        toLng = if (toIsPlace) to.longitude else null,
-                        toDisplayName = if (toIsPlace) to.name else null,
-                    ).getOrNull()
+                        departureDate = tflDate, departureTime = tflTime, timeIs = tflTimeIs,
+                    ).getOrDefault(emptyList())
                 }
             }
 
             allRoutes.addAll(tflFastest.await())
-            tflFewest.await()?.let { allRoutes.add(it) }
 
             // Fallback to local Dijkstra if TfL returned nothing
             if (allRoutes.isEmpty()) {
-                val fallback = if (useCoords) {
-                    buildLocalRouteWithWalking(lat!!, lng!!, to, "FASTEST")
-                } else if (!toIsPlace) {
-                    repository.findRoute(from!!.id, to.id, "FASTEST")
-                } else null
+                val fallback = when {
+                    useCoords -> buildLocalRouteWithWalking(lat!!, lng!!, to, "FASTEST")
+                    fromIsPlace -> buildLocalRouteWithWalking(from!!.latitude, from.longitude, to, "FASTEST")
+                    toIsPlace && from != null -> buildLocalRouteEndingAtCoords(from, to.latitude, to.longitude, to.name, "FASTEST")
+                    from != null -> repository.findRoute(from.id, to.id, "FASTEST")
+                    else -> null
+                }
                 fallback?.let { allRoutes.add(it) }
             }
 
@@ -566,6 +598,7 @@ class RouteViewModel @Inject constructor(
             val crowdStationId = from?.id ?: to.id
             if (options.isNotEmpty()) {
                 val primary = options.first()
+                repository.cacheRoute(primary.route)
                 _uiState.value = _uiState.value.copy(
                     routeOptions = options,
                     selectedRouteIndex = 0,
@@ -585,7 +618,7 @@ class RouteViewModel @Inject constructor(
                     crowdPrediction = repository.predictCrowding(to.id, hour, selectedCrowdDayType),
                     routeCalculated = false,
                     isCalculating = false,
-                    routeError = buildRouteError(useCoords, state.isInsideLondon, state.nearestStationName, state.nearestStationWalkMinutes),
+                    routeError = buildRouteError(useCoords, fromIsPlace, state.isInsideLondon, state.nearestStationName, state.nearestStationWalkMinutes, fromLat = if (fromIsPlace) from?.latitude else null, fromLng = if (fromIsPlace) from?.longitude else null),
                 )
             }
         }
@@ -652,16 +685,74 @@ class RouteViewModel @Inject constructor(
 
     private fun buildRouteError(
         useCoords: Boolean,
+        fromIsPlace: Boolean,
         inLondon: Boolean,
         nearestStation: String?,
         walkMins: Int?,
-    ): String = when {
-        useCoords && !inLondon && nearestStation != null ->
-            "You're outside London. Nearest tube station is ${nearestStation}" +
-                (walkMins?.let { " (~${it} min walk)" } ?: "") +
-                ". No direct tube route available from your location."
-        useCoords -> "Could not calculate route from your current location. Check your connection."
-        else -> "No route found between these stations. Try nearby alternatives."
+        fromLat: Double? = null,
+        fromLng: Double? = null,
+    ): String {
+        val fromOutsideLondon = fromLat != null && fromLng != null &&
+            (fromLat < 51.28 || fromLat > 51.75 || fromLng < -0.65 || fromLng > 0.40)
+        return when {
+            useCoords && !inLondon ->
+                "No route found from your location. Try entering a London station name to plan your journey."
+            useCoords -> "Could not calculate route from your current location. Check your connection."
+            fromIsPlace && fromOutsideLondon ->
+                "Could not plan a route from this location. Ensure you're entering a valid UK station and try again."
+            fromIsPlace -> "Could not find a route from this address. Try entering a nearby tube station instead."
+            else -> "No route found between these stations. Try nearby alternatives."
+        }
+    }
+
+    /**
+     * Local fallback when TfL API is unavailable and GPS is the destination.
+     * Routes from a tube station to the nearest tube station to GPS, then adds a walking leg.
+     */
+    private fun buildLocalRouteEndingAtCoords(
+        fromStation: Station,
+        destLat: Double,
+        destLng: Double,
+        destName: String,
+        preference: String,
+    ): com.londontubeai.navigator.data.model.JourneyRoute? {
+        val nearest = TubeData.getAllStationsSorted()
+            .minByOrNull { locationService.calculateDistance(destLat, destLng, it.latitude, it.longitude) }
+            ?: return null
+        if (nearest.id == fromStation.id) return null
+        val distKm = locationService.calculateDistance(destLat, destLng, nearest.latitude, nearest.longitude)
+        if (distKm > 15.0) return null
+        val walkMins = (distKm * 12.0).toInt().coerceAtLeast(1)
+        val walkDistM = (distKm * 1000.0).toInt()
+        val tubeRoute = repository.findRoute(fromStation.id, nearest.id, preference) ?: return null
+        val destination = Station(
+            id = "my-location-dest", name = destName,
+            lineIds = emptyList(), zone = "",
+            latitude = destLat, longitude = destLng,
+        )
+        val walkLine = com.londontubeai.navigator.data.model.TubeLine(
+            id = "walking", name = "Walking",
+            color = androidx.compose.ui.graphics.Color(0xFF607D8B),
+            stationIds = emptyList(),
+        )
+        val walkLeg = com.londontubeai.navigator.data.model.JourneyLeg(
+            fromStation = nearest,
+            toStation = destination,
+            line = walkLine,
+            durationMinutes = walkMins,
+            direction = "Walk to $destName",
+            intermediateStops = 0,
+            mode = com.londontubeai.navigator.data.model.TransportMode.WALKING,
+            walkingDistanceMeters = walkDistM,
+            walkingDirections = if (distKm < 1.0) "Head towards $destName (${(distKm * 1000).toInt()}m)"
+                               else "Head towards $destName (${String.format("%.1f", distKm)} km)",
+        )
+        return tubeRoute.copy(
+            toStation = destination,
+            legs = tubeRoute.legs + listOf(walkLeg),
+            totalDurationMinutes = tubeRoute.totalDurationMinutes + walkMins,
+            totalWalkingMinutes = tubeRoute.totalWalkingMinutes + walkMins,
+        )
     }
 
     private fun buildOptionDescription(route: JourneyRoute): String {

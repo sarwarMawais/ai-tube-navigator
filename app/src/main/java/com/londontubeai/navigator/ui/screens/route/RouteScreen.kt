@@ -78,7 +78,6 @@ import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.SyncAlt
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -99,6 +98,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -166,6 +166,14 @@ fun RouteScreen(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var showTimePicker by remember { mutableStateOf(false) }
+
+    LaunchedEffect(uiState.routeCalculated) {
+        if (uiState.routeCalculated) {
+            (context as? android.app.Activity)?.let {
+                viewModel.reviewManager.onJourneyCompleted(it)
+            }
+        }
+    }
 
     val swapRotation by animateFloatAsState(
         targetValue = if (uiState.isSwapping) 180f else 0f,
@@ -251,7 +259,7 @@ fun RouteScreen(
                                 Icon(Icons.Filled.MyLocation, null, tint = StatusGood, modifier = Modifier.size(13.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = uiState.nearestStationWalkMinutes?.let {
+                                    text = uiState.nearestStationWalkMinutes?.takeIf { it in 1..60 }?.let {
                                         "${uiState.nearestStationName} · ~${it} min walk"
                                     } ?: "In London · Live data active",
                                     style = MaterialTheme.typography.labelSmall,
@@ -273,9 +281,10 @@ fun RouteScreen(
                                 Icon(Icons.Filled.Public, null, tint = StatusMinor, modifier = Modifier.size(13.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = uiState.nearestStationWalkMinutes?.let {
-                                        "Outside London · ${uiState.nearestStationName} (~${it} min walk)"
-                                    } ?: "Outside London · ${uiState.nearestStationName}",
+                                    text = uiState.nearestStationWalkMinutes
+                                        ?.takeIf { it in 1..60 && (uiState.nearestStationDistance ?: 99.0) < 5.0 }
+                                        ?.let { "Outside London · ${uiState.nearestStationName} (~$it min walk)" }
+                                        ?: "Outside London · TfL routes searched from your location",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = StatusMinor,
                                 )
@@ -313,6 +322,9 @@ fun RouteScreen(
                         onSelectOption = { viewModel.selectRouteOption(it) },
                         onNavigateToMap = onNavigateToMap,
                         route = route,
+                        departureOption = uiState.departureOption,
+                        currentHour = uiState.currentHour,
+                        currentMinute = uiState.currentMinute,
                     )
                 }
 
@@ -772,11 +784,26 @@ private fun GMapsSearchHeader(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(0.dp)) {
                 items(DepartureOption.entries.toList()) { opt ->
                     val sel = uiState.departureOption == opt
+                    val chipLabel = if (sel && opt != DepartureOption.LEAVE_NOW) {
+                        "${opt.label} · %02d:%02d".format(uiState.currentHour, uiState.currentMinute)
+                    } else {
+                        opt.label
+                    }
                     FilterChip(
                         selected = sel,
                         onClick = { onSelectDeparture(opt) },
-                        label = { Text(opt.label, style = MaterialTheme.typography.labelSmall, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal) },
-                        leadingIcon = { Icon(when (opt) { DepartureOption.LEAVE_NOW -> Icons.Filled.FlashOn; DepartureOption.DEPART_AT -> Icons.Filled.Schedule; DepartureOption.ARRIVE_BY -> Icons.Outlined.Schedule }, null, modifier = Modifier.size(13.dp)) },
+                        label = { Text(chipLabel, style = MaterialTheme.typography.labelSmall, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal) },
+                        leadingIcon = {
+                            Icon(
+                                when (opt) {
+                                    DepartureOption.LEAVE_NOW -> Icons.Filled.FlashOn
+                                    DepartureOption.DEPART_AT -> Icons.Filled.Schedule
+                                    DepartureOption.ARRIVE_BY -> Icons.Filled.Timer
+                                },
+                                null,
+                                modifier = Modifier.size(13.dp),
+                            )
+                        },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), selectedLabelColor = MaterialTheme.colorScheme.primary, selectedLeadingIconColor = MaterialTheme.colorScheme.primary),
                         border = FilterChipDefaults.filterChipBorder(enabled = true, selected = sel, borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f), selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
                     )
@@ -793,6 +820,9 @@ private fun RouteOptionsSection(
     onSelectOption: (Int) -> Unit,
     onNavigateToMap: (String, String) -> Unit,
     route: com.londontubeai.navigator.data.model.JourneyRoute?,
+    departureOption: DepartureOption = DepartureOption.LEAVE_NOW,
+    currentHour: Int = 0,
+    currentMinute: Int = 0,
 ) {
     val fastestDuration = options.firstOrNull()?.route?.totalDurationMinutes ?: 0
 
@@ -808,12 +838,21 @@ private fun RouteOptionsSection(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    "Route options",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Route options",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    if (departureOption != DepartureOption.LEAVE_NOW) {
+                        val label = if (departureOption == DepartureOption.ARRIVE_BY) "Arriving by" else "Departing"
+                        Text(
+                            "$label %02d:%02d".format(currentHour, currentMinute),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
                 Text(
                     "${options.size} option${if (options.size != 1) "s" else ""}",
                     style = MaterialTheme.typography.labelSmall,
@@ -1199,7 +1238,7 @@ private fun TimelineDot(
         Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = if (isOrigin || isFinal) FontWeight.Bold else FontWeight.SemiBold)
         if (badge != null) {
             Spacer(modifier = Modifier.width(8.dp))
-            Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFFFF9800).copy(alpha = 0.12f)) {
+            Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFFFF9800).copy(alpha = 0.22f)) {
                 Text(badge, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = Color(0xFFFF9800), fontWeight = FontWeight.Bold)
             }
         }
@@ -1300,6 +1339,12 @@ private fun JourneyDetailsSection(route: JourneyRoute) {
                 JourneyDetailChip(title = "Next train", value = "${firstTubeLeg.nextDepartureMinutes} min")
             }
             JourneyDetailChip(title = "Service every", value = serviceLine?.peakFrequencyMinutes?.let { "$it min" } ?: "Live")
+            route.estimatedFarePounds?.let { fare ->
+                JourneyDetailChip(title = "Oyster / contactless", value = "£${"%,.2f".format(fare)}")
+            }
+            if (route.isStepFreeRoute) {
+                JourneyDetailChip(title = "Accessibility", value = "Step-free")
+            }
         }
 
         if (serviceLine != null) {

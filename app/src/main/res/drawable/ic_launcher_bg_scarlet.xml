@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Rainbow stripes — 6 bands × 18dp = 108dp -->
+    <path android:fillColor="#E40303" android:pathData="M0,0h108v18h-108z"/>
+    <path android:fillColor="#FF8C00" android:pathData="M0,18h108v18h-108z"/>
+    <path android:fillColor="#FFED00" android:pathData="M0,36h108v18h-108z"/>
+    <path android:fillColor="#008026" android:pathData="M0,54h108v18h-108z"/>
+    <path android:fillColor="#004DFF" android:pathData="M0,72h108v18h-108z"/>
+    <path android:fillColor="#750787" android:pathData="M0,90h108v18h-108z"/>
+
+</vector>

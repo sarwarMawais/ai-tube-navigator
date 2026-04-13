@@ -918,7 +918,7 @@ fun StationDetailScreen(
                         Icon(Icons.Filled.Star, null, Modifier.size(20.dp), tint = TubePrimary)
                         Spacer(Modifier.width(8.dp))
                         Text("Reviews", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFFFFC107).copy(alpha = 0.15f)) {
+                        Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFFFFC107).copy(alpha = 0.22f)) {
                             Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Star, null, Modifier.size(13.dp), tint = Color(0xFFFFC107))
                                 Spacer(Modifier.width(4.dp))

@@ -54,6 +54,11 @@ interface TflApiService {
         @Path("to") toStationId: String,
         @Query("mode") mode: String = "tube",
         @Query("journeyPreference") preference: String = "leasttime",
+        @Query("nationalSearch") nationalSearch: Boolean = false,
+        @Query("date") date: String? = null,    // YYYYMMDD, null = today
+        @Query("time") time: String? = null,    // HHmm e.g. "1330", null = now
+        @Query("timeIs") timeIs: String? = null, // "departing" or "arriving"
+        @Query("accessibilityPreference") accessibilityPreference: String? = null,
     ): TflJourneyResponse
 
     // ── Place / StopPoint Search ────────────────────────────

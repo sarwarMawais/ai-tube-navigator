@@ -97,18 +97,10 @@ import com.londontubeai.navigator.data.model.LineStationStop
 import com.londontubeai.navigator.data.model.LineStatus
 import com.londontubeai.navigator.ui.theme.Spacing
 import com.londontubeai.navigator.ui.theme.StatusGood
-import com.londontubeai.navigator.ui.theme.StatusGoodBg
 import com.londontubeai.navigator.ui.theme.StatusMinor
-import com.londontubeai.navigator.ui.theme.StatusMinorBg
 import com.londontubeai.navigator.ui.theme.StatusSevere
-import com.londontubeai.navigator.ui.theme.StatusSevereBg
-import com.londontubeai.navigator.ui.theme.TubeBorder
-import com.londontubeai.navigator.ui.theme.TubeInk2
-import com.londontubeai.navigator.ui.theme.TubeInk3
 import com.londontubeai.navigator.ui.theme.TubeLineColors
-import com.londontubeai.navigator.ui.theme.TubeOffWhite
 import com.londontubeai.navigator.ui.theme.TubePrimary
-import com.londontubeai.navigator.ui.theme.TubeSurface2
 import com.londontubeai.navigator.ui.components.UnifiedHeader
 import java.util.Calendar
 
@@ -650,7 +642,7 @@ private fun LineStatusCard(
                         imageVector = if (uiModel.isFavourite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                         contentDescription = "Favourite",
                         modifier = Modifier.size(20.dp).scale(favouriteScale),
-                        tint = if (uiModel.isFavourite) StatusSevere else TubeInk3,
+                        tint = if (uiModel.isFavourite) StatusSevere else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

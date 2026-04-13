@@ -121,8 +121,10 @@ private fun LicenseCard(library: OssLibrary) {
             .fillMaxWidth()
             .animateContentSize(),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         onClick = { expanded = !expanded },
     ) {
         Column(modifier = Modifier.padding(Spacing.md)) {

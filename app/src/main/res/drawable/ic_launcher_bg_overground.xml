@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Sunrise gradient – dark top, bright amber bottom -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="54" android:startY="0" android:endX="54" android:endY="108" android:type="linear">
+                <item android:offset="0.0" android:color="#FF3A1A00" />
+                <item android:offset="0.4" android:color="#FFA84000" />
+                <item android:offset="0.8" android:color="#FFEF8010" />
+                <item android:offset="1.0" android:color="#FFFFA030" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Sun arc (centred at bottom edge) -->
+    <path android:fillColor="#FFEF20" android:fillAlpha="0.30"
+        android:pathData="M20,108a34,34 0 1 1 68,0Z"/>
+    <!-- Inner sun glow -->
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.18"
+        android:pathData="M32,108a22,22 0 1 1 44,0Z"/>
+    <!-- Light rays (soft triangles spreading up) -->
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.05"
+        android:pathData="M54,108L40,62L54,68Z"/>
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.05"
+        android:pathData="M54,108L68,62L54,68Z"/>
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.04"
+        android:pathData="M54,108L20,52L38,64Z"/>
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.04"
+        android:pathData="M54,108L88,52L70,64Z"/>
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.03"
+        android:pathData="M54,108L0,44L22,62Z"/>
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.03"
+        android:pathData="M54,108L108,44L86,62Z"/>
+
+</vector>

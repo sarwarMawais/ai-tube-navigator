@@ -67,6 +67,10 @@ import androidx.compose.material.icons.automirrored.filled.Accessible
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.WbCloudy
+import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.Opacity
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.foundation.layout.heightIn
@@ -619,8 +623,16 @@ private fun HeroHeader(
                             ) {
                                 Icon(
                                     imageVector = when (weather.icon) {
-                                        "partly_cloudy" -> Icons.Filled.WbCloudy
-                                        else -> Icons.Filled.Cloud
+                                        "01d", "01n" -> Icons.Filled.WbSunny
+                                        "02d", "02n" -> Icons.Filled.WbCloudy
+                                        "03d", "03n" -> Icons.Filled.Cloud
+                                        "04d", "04n" -> Icons.Filled.Cloud
+                                        "09d", "09n" -> Icons.Filled.Opacity
+                                        "10d", "10n" -> Icons.Filled.Opacity
+                                        "11d", "11n" -> Icons.Filled.FlashOn
+                                        "13d", "13n" -> Icons.Filled.AcUnit
+                                        "50d", "50n" -> Icons.Filled.Cloud
+                                        else -> Icons.Filled.WbSunny
                                     },
                                     contentDescription = null,
                                     tint = Color.White,
@@ -3127,7 +3139,7 @@ private fun InsightDetailSheet(
     // Use consistent blue theme for all insights
     val blueColor = Color(0xFF1976D2)
     val iconTint = blueColor
-    val bgColor = blueColor.copy(alpha = 0.15f)
+    val bgColor = blueColor.copy(alpha = 0.22f)
 
     val icon = when (insight.type) {
         InsightType.CROWD_ALERT -> Icons.AutoMirrored.Filled.TrendingUp

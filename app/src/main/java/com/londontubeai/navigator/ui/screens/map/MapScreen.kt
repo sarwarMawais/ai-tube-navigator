@@ -3,6 +3,7 @@ package com.londontubeai.navigator.ui.screens.map
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -22,8 +23,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -44,6 +47,8 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Terrain
 import androidx.compose.material.icons.filled.Train
 import androidx.compose.material3.Card
@@ -80,6 +85,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import com.londontubeai.navigator.data.model.LineStatus
 import com.londontubeai.navigator.data.model.Station
 import com.londontubeai.navigator.data.model.TransportMode
@@ -95,6 +101,11 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.Dash
+import com.google.android.gms.maps.model.Dot
+import com.google.android.gms.maps.model.Gap
+import com.google.android.gms.maps.model.LatLngBounds
+import com.google.maps.android.compose.Circle
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapType
@@ -154,12 +165,21 @@ fun MapScreen(
 
     LaunchedEffect(uiState.journeyRoute?.fromStation?.id, uiState.journeyRoute?.toStation?.id) {
         uiState.journeyRoute?.let { route ->
-            cameraPositionState.move(
-                CameraUpdateFactory.newLatLngZoom(
-                    LatLng(route.fromStation.latitude, route.fromStation.longitude),
-                    13f,
-                )
-            )
+            val builder = LatLngBounds.Builder()
+            builder.include(LatLng(route.fromStation.latitude, route.fromStation.longitude))
+            builder.include(LatLng(route.toStation.latitude, route.toStation.longitude))
+            route.legs.forEach { leg ->
+                leg.stationIds.forEach { sid ->
+                    TubeData.getStationById(sid)?.let { builder.include(LatLng(it.latitude, it.longitude)) }
+                }
+                leg.polylinePoints.forEach { (lat, lng) -> builder.include(LatLng(lat, lng)) }
+            }
+            delay(400)
+            try {
+                cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(builder.build(), 160), 1200)
+            } catch (e: Exception) {
+                cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(LatLng(route.fromStation.latitude, route.fromStation.longitude), 12f))
+            }
         }
     }
 
@@ -176,8 +196,8 @@ fun MapScreen(
 
     // Search results
     val searchResults = remember(searchQuery) {
-        if (searchQuery.length < 2) emptyList()
-        else stations.filter { it.name.contains(searchQuery, ignoreCase = true) }.take(5)
+        if (searchQuery.isBlank()) emptyList()
+        else stations.filter { it.name.contains(searchQuery.trim(), ignoreCase = true) }.take(6)
     }
 
     // Filter stations by selected line
@@ -192,10 +212,17 @@ fun MapScreen(
         else connections.filter { it.lineId == selectedLineFilter }
     }
 
+    // Bitmap cache — avoids recreating hundreds of bitmaps on every recomposition
+    val bitmapCache = remember { HashMap<String, com.google.android.gms.maps.model.BitmapDescriptor>() }
+
+    // Bucket zoom into 1-unit steps so clustering only recalculates at whole-number zoom changes
+    val zoomBucket = (cameraPositionState.position.zoom).toInt()
+
     // Cluster stations based on zoom level
-    val clusteredStations = remember(cameraPositionState.position.zoom, filteredStations) {
-        if (cameraPositionState.position.zoom < CLUSTERING_ZOOM_THRESHOLD) {
-            val gridSize = if (cameraPositionState.position.zoom < 10f) 10 else 25
+    val clusteredStations = remember(zoomBucket, filteredStations) {
+        val zoom = cameraPositionState.position.zoom
+        if (zoom < CLUSTERING_ZOOM_THRESHOLD) {
+            val gridSize = if (zoom < 10f) 10 else 25
             val clusterGrid = mutableMapOf<String, MutableList<Station>>()
             filteredStations.forEach { station ->
                 val gridKey = "${(station.latitude * gridSize).toInt()}_${(station.longitude * gridSize).toInt()}"
@@ -219,6 +246,48 @@ fun MapScreen(
     // Build a lineId → LineStatus map for quick lookup in the map content block
     val lineStatusMap = remember(uiState.lineStatuses) {
         uiState.lineStatuses.associateBy { it.lineId }
+    }
+
+    // Pulsing animation for user location dot
+    val pulseTransition = rememberInfiniteTransition(label = "userPulse")
+    val pulseRadius by pulseTransition.animateFloat(
+        initialValue = 25f, targetValue = 120f,
+        animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Restart),
+        label = "pulseRadius",
+    )
+    val pulseAlpha by pulseTransition.animateFloat(
+        initialValue = 0.45f, targetValue = 0f,
+        animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Restart),
+        label = "pulseAlpha",
+    )
+
+    // Per-second clock drives smooth train position interpolation
+    var currentTimeMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { delay(1000L); currentTimeMs = System.currentTimeMillis() } }
+
+    // Live train positions derived from nearby arrivals
+    val liveTrains = remember(uiState.nearbyArrivals, uiState.nearbyArrivalsUpdatedAt, currentTimeMs, connections) {
+        val elapsedSec = ((currentTimeMs - uiState.nearbyArrivalsUpdatedAt) / 1000f).coerceAtLeast(0f)
+        buildList {
+            uiState.nearbyArrivals.forEach { (stationId, arrivals) ->
+                val destStation = TubeData.getStationById(stationId) ?: return@forEach
+                arrivals.arrivals
+                    .filter { it.timeToStationSeconds in 1..200 }
+                    .forEach { arrival ->
+                        val conn = connections.firstOrNull { c ->
+                            (c.toStationId == stationId || c.fromStationId == stationId) &&
+                            c.lineId == arrival.lineId
+                        } ?: return@forEach
+                        val otherStationId = if (conn.toStationId == stationId) conn.fromStationId else conn.toStationId
+                        val otherStation = TubeData.getStationById(otherStationId) ?: return@forEach
+                        val adjustedSecs = (arrival.timeToStationSeconds - elapsedSec).coerceAtLeast(0f)
+                        val fraction = (1f - adjustedSecs / 160f).coerceIn(0.04f, 0.96f)
+                        val trainLat = otherStation.latitude + fraction * (destStation.latitude - otherStation.latitude)
+                        val trainLng = otherStation.longitude + fraction * (destStation.longitude - otherStation.longitude)
+                        add(Triple(LatLng(trainLat, trainLng), arrival.lineColor, arrival.lineName))
+                    }
+            }
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -252,8 +321,8 @@ fun MapScreen(
                 showMapStylePicker = false
             },
         ) {
-            // Draw tube line polylines with live status-aware coloring
-            filteredConnections.groupBy { it.lineId }.forEach { (lineId, conns) ->
+            // Draw tube line polylines — hidden when a journey route is active for clarity
+            if (uiState.journeyRoute == null) filteredConnections.groupBy { it.lineId }.forEach { (lineId, conns) ->
                 val line = TubeData.getLineById(lineId) ?: return@forEach
                 val status = lineStatusMap[lineId]
                 val isDisrupted = status != null && !status.isGoodService
@@ -282,75 +351,149 @@ fun MapScreen(
                 }
             }
 
+            // ── Active Journey Route Polylines ───────────────────────────────
             uiState.journeyRoute?.legs?.forEach { leg ->
-                val routePoints = when (leg.mode) {
-                    TransportMode.TUBE -> leg.stationIds.mapNotNull { stationId ->
-                        TubeData.getStationById(stationId)?.let { LatLng(it.latitude, it.longitude) }
-                    }.ifEmpty {
-                        listOf(
-                            LatLng(leg.fromStation.latitude, leg.fromStation.longitude),
-                            LatLng(leg.toStation.latitude, leg.toStation.longitude),
-                        )
-                    }
-                    else -> listOf(
-                        LatLng(leg.fromStation.latitude, leg.fromStation.longitude),
-                        LatLng(leg.toStation.latitude, leg.toStation.longitude),
-                    )
+                val routePoints = when {
+                    leg.polylinePoints.isNotEmpty() ->
+                        leg.polylinePoints.map { (lat, lng) -> LatLng(lat, lng) }
+                    leg.mode == TransportMode.TUBE ->
+                        leg.stationIds.mapNotNull { TubeData.getStationById(it)?.let { s -> LatLng(s.latitude, s.longitude) } }
+                            .ifEmpty { listOf(LatLng(leg.fromStation.latitude, leg.fromStation.longitude), LatLng(leg.toStation.latitude, leg.toStation.longitude)) }
+                    else -> listOf(LatLng(leg.fromStation.latitude, leg.fromStation.longitude), LatLng(leg.toStation.latitude, leg.toStation.longitude))
                 }
                 if (routePoints.size >= 2) {
                     Polyline(
                         points = routePoints,
                         color = when (leg.mode) {
                             TransportMode.WALKING -> StatusGood
-                            TransportMode.BUS -> StatusMinor
+                            TransportMode.BUS -> Color(0xFFE32017)
                             TransportMode.TUBE -> leg.line.color
                         },
                         width = when (leg.mode) {
-                            TransportMode.WALKING -> 9f
+                            TransportMode.WALKING -> 8f
                             TransportMode.BUS -> 10f
-                            TransportMode.TUBE -> 14f
+                            TransportMode.TUBE -> 16f
+                        },
+                        pattern = when (leg.mode) {
+                            TransportMode.WALKING -> listOf(Dash(18f), Gap(10f))
+                            TransportMode.BUS -> listOf(Dot(), Gap(8f))
+                            TransportMode.TUBE -> null
                         },
                         zIndex = 3f,
+                        geodesic = true,
                     )
+                    // Shadow/outline for tube lines
+                    if (leg.mode == TransportMode.TUBE) {
+                        Polyline(
+                            points = routePoints,
+                            color = Color.Black.copy(alpha = 0.25f),
+                            width = 20f,
+                            zIndex = 2f,
+                            geodesic = true,
+                        )
+                    }
+                }
+                // Intermediate stop dots on tube legs
+                if (leg.mode == TransportMode.TUBE) {
+                    leg.stationIds.drop(1).dropLast(1).forEach { stopId ->
+                        val s = TubeData.getStationById(stopId) ?: return@forEach
+                        Circle(
+                            center = LatLng(s.latitude, s.longitude),
+                            radius = 60.0,
+                            strokeColor = leg.line.color,
+                            fillColor = Color.White,
+                            strokeWidth = 3f,
+                            zIndex = 4f,
+                        )
+                    }
                 }
             }
 
+            // ── Journey Start / End Markers ───────────────────────────────────
             uiState.journeyRoute?.let { journey ->
+                val startPos = LatLng(journey.fromStation.latitude, journey.fromStation.longitude)
+                val endPos = LatLng(journey.toStation.latitude, journey.toStation.longitude)
+                Circle(center = startPos, radius = 60.0, strokeColor = StatusGood, fillColor = StatusGood.copy(alpha = 0.3f), strokeWidth = 4f, zIndex = 5f)
                 Marker(
-                    state = MarkerState(position = LatLng(journey.fromStation.latitude, journey.fromStation.longitude)),
-                    title = "Start · ${journey.fromStation.name}",
+                    state = MarkerState(position = startPos),
+                    title = "🟢 Start · ${journey.fromStation.name}",
                     snippet = "Journey origin",
+                    icon = bitmapCache.getOrPut("start") {
+                        BitmapDescriptorFactory.fromBitmap(createRouteEndpointBitmap(android.graphics.Color.rgb(76, 175, 80), "A"))
+                    },
                     zIndex = 5f,
                 )
+                Circle(center = endPos, radius = 60.0, strokeColor = Color(0xFFE53935), fillColor = Color(0xFFE53935).copy(alpha = 0.3f), strokeWidth = 4f, zIndex = 5f)
                 Marker(
-                    state = MarkerState(position = LatLng(journey.toStation.latitude, journey.toStation.longitude)),
-                    title = "Destination · ${journey.toStation.name}",
+                    state = MarkerState(position = endPos),
+                    title = "🔴 Destination · ${journey.toStation.name}",
                     snippet = "Journey destination",
+                    icon = bitmapCache.getOrPut("end") {
+                        BitmapDescriptorFactory.fromBitmap(createRouteEndpointBitmap(android.graphics.Color.rgb(229, 57, 53), "B"))
+                    },
                     zIndex = 5f,
                 )
             }
 
+            // ── Animated User Location ────────────────────────────────────────
             if (uiState.userLat != null && uiState.userLng != null) {
+                val userPos = LatLng(uiState.userLat!!, uiState.userLng!!)
+                // Outer pulsing ring (scaled to meters so it’s visible at zoom 13-15)
+                Circle(
+                    center = userPos,
+                    radius = (pulseRadius * 2.5f).toDouble().coerceIn(80.0, 350.0),
+                    strokeColor = Color(0xFF1565C0).copy(alpha = pulseAlpha * 0.8f),
+                    fillColor = Color(0xFF1E88E5).copy(alpha = pulseAlpha * 0.15f),
+                    strokeWidth = 3f,
+                    zIndex = 9f,
+                )
+                // Solid accuracy dot (~80m radius)
+                Circle(
+                    center = userPos,
+                    radius = 80.0,
+                    strokeColor = Color.White,
+                    fillColor = Color(0xFF1E88E5).copy(alpha = 0.2f),
+                    strokeWidth = 2f,
+                    zIndex = 9f,
+                )
+                // Prominent marker on top
                 Marker(
-                    state = MarkerState(position = LatLng(uiState.userLat!!, uiState.userLng!!)),
-                    title = "Your location",
-                    snippet = uiState.nearestStationDistanceKm?.let { distance ->
-                        val nearestName = uiState.nearestStationId?.let { TubeData.getStationById(it)?.name }
-                        if (nearestName != null) {
-                            "Nearest station: $nearestName · ${"%.1f".format(distance)} km"
-                        } else {
-                            null
+                    state = MarkerState(position = userPos),
+                    title = "📍 You are here",
+                    snippet = uiState.nearestStationId?.let { id ->
+                        TubeData.getStationById(id)?.let { s ->
+                            "Nearest: ${s.name} · ${"%.1f".format(uiState.nearestStationDistanceKm ?: 0.0)} km"
                         }
                     },
-                    zIndex = 4f,
+                    icon = bitmapCache.getOrPut("user_loc") {
+                        BitmapDescriptorFactory.fromBitmap(createUserLocationBitmap())
+                    },
+                    zIndex = 11f,
+                    flat = false,
                 )
             }
 
-            // Draw station markers
-            clusteredStations.forEach { cluster ->
+            // ── Live Train Markers ────────────────────────────────────────────
+            liveTrains.forEachIndexed { index, (position, color, lineName) ->
+                val key = "train_${color.toArgb()}"
+                Marker(
+                    state = MarkerState(position = position),
+                    title = "🚂 $lineName",
+                    snippet = "Live train approaching",
+                    icon = bitmapCache.getOrPut(key) {
+                        BitmapDescriptorFactory.fromBitmap(createTrainBitmap(color))
+                    },
+                    zIndex = 7f,
+                    alpha = 0.95f,
+                )
+            }
+
+            // Draw station markers — hidden when a route is active
+            if (uiState.journeyRoute == null) clusteredStations.forEach { cluster ->
                 val isCluster = cluster.count > 1
                 val primaryLine = cluster.primaryLineId?.let { TubeData.getLineById(it) }
                 val lineColor = primaryLine?.color ?: TubePrimary
+                val colorArgb = lineColor.toArgb()
 
                 Marker(
                     state = MarkerState(position = cluster.position),
@@ -362,33 +505,43 @@ fun MapScreen(
                     },
                     alpha = 0.95f,
                     icon = if (isCluster) {
-                        BitmapDescriptorFactory.fromBitmap(createClusterBitmap(cluster.count, lineColor))
+                        val key = "c_${cluster.count}_$colorArgb"
+                        bitmapCache.getOrPut(key) {
+                            BitmapDescriptorFactory.fromBitmap(createClusterBitmap(cluster.count, lineColor))
+                        }
                     } else {
-                        BitmapDescriptorFactory.fromBitmap(
-                            createStationBitmap(lineColor, cluster.stations.first().hasStepFreeAccess)
-                        )
+                        val s = cluster.stations.first()
+                        val isSelected = selectedStation?.id == s.id
+                        val key = "s_${colorArgb}_${s.hasStepFreeAccess}_$isSelected"
+                        bitmapCache.getOrPut(key) {
+                            BitmapDescriptorFactory.fromBitmap(
+                                createStationBitmap(lineColor, s.hasStepFreeAccess, selected = isSelected)
+                            )
+                        }
                     },
+                    zIndex = if (selectedStation?.id == cluster.stations.firstOrNull()?.id) 4f else 1f,
                     onClick = {
                         if (isCluster) {
                             cameraPositionState.move(
                                 CameraUpdateFactory.newLatLngZoom(cluster.position, cameraPositionState.position.zoom + 2f)
                             )
+                            true
                         } else {
-                            val tapped = cluster.stations.first()
-                            selectedStation = tapped
-                            viewModel.selectStation(tapped)
+                            val station = cluster.stations.first()
+                            selectedStation = station
+                            viewModel.selectStation(station)
+                            true
                         }
-                        false
                     },
                 )
             }
         }
 
-        // ── Top Search Bar ───────────────────────────────────
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = Spacing.xxxl, start = Spacing.screenHorizontal, end = Spacing.screenHorizontal),
+                .statusBarsPadding()
+                .padding(top = Spacing.sm, start = Spacing.screenHorizontal, end = Spacing.screenHorizontal),
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
             shadowElevation = 12.dp,
@@ -504,9 +657,10 @@ fun MapScreen(
                                         searchQuery = ""
                                         showSearch = false
                                         selectedStation = station
+                                        viewModel.selectStation(station)
                                         cameraPositionState.move(
                                             CameraUpdateFactory.newLatLngZoom(
-                                                LatLng(station.latitude, station.longitude), 15f
+                                                LatLng(station.latitude, station.longitude), 15.5f
                                             )
                                         )
                                     },
@@ -530,6 +684,7 @@ fun MapScreen(
                                                 stationLineColors.forEach { line ->
                                                     Box(modifier = Modifier.padding(end = 4.dp).size(8.dp).clip(CircleShape).background(line.color))
                                                 }
+                                                Spacer(modifier = Modifier.width(4.dp))
                                                 Text("Zone ${station.zone}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                                 if (station.hasStepFreeAccess) {
                                                     Text(" · Step-free", style = MaterialTheme.typography.labelSmall, color = StatusGood)
@@ -553,7 +708,7 @@ fun MapScreen(
                             }
                         }
                     }
-                } else if (showSearch && searchQuery.length >= 2) {
+                } else if (showSearch && searchQuery.isNotBlank()) {
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                         shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
@@ -621,7 +776,7 @@ fun MapScreen(
             }
         }
 
-        if (uiState.journeyRoute == null && uiState.nearestStationId != null) {
+        if (uiState.journeyRoute == null && uiState.nearestStationId != null && !showSearch) {
             val nearestStation = TubeData.getStationById(uiState.nearestStationId!!)
             nearestStation?.let { station ->
                 Surface(
@@ -712,7 +867,7 @@ fun MapScreen(
         }
 
         Column(
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = Spacing.screenHorizontal, bottom = if (selectedStation != null) Spacing.xxxl else Spacing.lg),
+            modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = Spacing.screenHorizontal, bottom = if (selectedStation != null) 300.dp else Spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
             SmallFloatingActionButton(
@@ -745,7 +900,7 @@ fun MapScreen(
 
         AnimatedVisibility(
             visible = showMapStylePicker,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = Spacing.xxl, bottom = if (selectedStation != null) Spacing.xxxl else Spacing.lg),
+            modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = Spacing.xxl, bottom = if (selectedStation != null) 300.dp else Spacing.lg),
             enter = fadeIn() + slideInVertically { it / 2 },
             exit = fadeOut() + slideOutVertically { it / 2 },
         ) {
@@ -775,36 +930,41 @@ fun MapScreen(
             }
         }
 
-        // Network Status Strip — live disruption alerts
-        AnimatedVisibility(
-            visible = uiState.lineStatuses.any { !it.isGoodService },
-            modifier = Modifier.align(Alignment.BottomStart).padding(start = 16.dp, bottom = 88.dp),
-            enter = fadeIn() + slideInVertically { it / 2 },
-            exit = fadeOut() + slideOutVertically { it / 2 },
+        // Network Status Strip + station badge — stacked in a column to prevent overlap
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .navigationBarsPadding()
+                .padding(start = 16.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            NetworkStatusStrip(lineStatuses = uiState.lineStatuses)
-        }
-
-        Surface(
-            modifier = Modifier.align(Alignment.BottomStart).padding(start = 16.dp, bottom = 28.dp),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.93f),
-            shadowElevation = 6.dp,
-        ) {
-            Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                val badgeColor = selectedLineFilter?.let { TubeData.getLineById(it)?.color } ?: MaterialTheme.colorScheme.primary
-                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(badgeColor))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (uiState.journeyRoute != null) {
-                        "${uiState.journeyRoute!!.legs.size} steps · active route"
-                    } else {
-                        "${filteredStations.size} stations" +
-                            if (selectedLineFilter != null) " · ${TubeData.getLineById(selectedLineFilter!!)?.name ?: ""}" else ""
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
+            AnimatedVisibility(
+                visible = uiState.lineStatuses.any { !it.isGoodService },
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = fadeOut() + slideOutVertically { it / 2 },
+            ) {
+                NetworkStatusStrip(lineStatuses = uiState.lineStatuses)
+            }
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.93f),
+                shadowElevation = 6.dp,
+            ) {
+                Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val badgeColor = selectedLineFilter?.let { TubeData.getLineById(it)?.color } ?: MaterialTheme.colorScheme.primary
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(badgeColor))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (uiState.journeyRoute != null) {
+                            "${uiState.journeyRoute!!.legs.size} steps · active route"
+                        } else {
+                            "${filteredStations.size} stations" +
+                                if (selectedLineFilter != null) " · ${TubeData.getLineById(selectedLineFilter!!)?.name ?: ""}" else ""
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
 
@@ -820,11 +980,13 @@ fun MapScreen(
                     arrivals = uiState.stationArrivals,
                     isLoadingArrivals = uiState.isLoadingArrivals,
                     arrivalsError = uiState.arrivalsError,
+                    lineStatuses = uiState.lineStatuses,
                     onClose = {
                         selectedStation = null
                         viewModel.selectStation(null)
                     },
                     onViewDetails = { onStationClick(station.id) },
+                    onPlanRoute = { onStationClick(station.id) },
                 )
             }
         }
@@ -838,13 +1000,18 @@ private fun StationInfoCard(
     arrivals: com.londontubeai.navigator.data.model.StationArrivals?,
     isLoadingArrivals: Boolean,
     arrivalsError: Boolean,
+    lineStatuses: List<LineStatus> = emptyList(),
     onClose: () -> Unit,
     onViewDetails: () -> Unit,
+    onPlanRoute: () -> Unit = {},
 ) {
     val stationLines = remember(station.id) { TubeData.getLinesForStation(station.id) }
+    val stationLineStatusMap = remember(lineStatuses, station.id) {
+        lineStatuses.filter { ls -> station.lineIds.contains(ls.lineId) }.associateBy { it.lineId }
+    }
 
     Card(
-        modifier = Modifier.fillMaxWidth().padding(12.dp),
+        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 16.dp),
@@ -888,14 +1055,25 @@ private fun StationInfoCard(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Line chips
+            // Line chips with live status badge
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(stationLines) { line ->
+                    val ls = stationLineStatusMap[line.id]
+                    val statusColor = when {
+                        ls == null -> line.color
+                        ls.isGoodService -> StatusGood
+                        ls.statusSeverity <= 3 -> StatusSevere
+                        else -> StatusMinor
+                    }
                     Surface(shape = RoundedCornerShape(10.dp), color = line.color.copy(alpha = 0.12f)) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(line.color))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(line.name, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = if (isLightColor(line.color)) Color.Black else line.color)
+                            if (ls != null) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(statusColor))
+                            }
                         }
                     }
                 }
@@ -987,13 +1165,20 @@ private fun StationInfoCard(
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             arrivals.arrivals
                                 .sortedBy { it.timeToStationSeconds }
-                                .take(5)
+                                .take(6)
                                 .forEach { arrival ->
                                     val lineColor = com.londontubeai.navigator.data.model.TubeData
                                         .getLineById(arrival.lineId)?.color ?: MaterialTheme.colorScheme.primary
+                                    val lineName = com.londontubeai.navigator.data.model.TubeData
+                                        .getLineById(arrival.lineId)?.name ?: arrival.lineName
+                                    val urgency = when {
+                                        arrival.timeToStationSeconds < 60 -> StatusSevere
+                                        arrival.timeToStationSeconds < 180 -> StatusMinor
+                                        else -> MaterialTheme.colorScheme.primary
+                                    }
                                     Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = lineColor.copy(alpha = 0.07f),
                                     ) {
                                         Row(
                                             modifier = Modifier
@@ -1001,12 +1186,17 @@ private fun StationInfoCard(
                                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(10.dp)
-                                                    .clip(CircleShape)
-                                                    .background(lineColor)
-                                            )
+                                            // Line color pill
+                                            Surface(shape = RoundedCornerShape(6.dp), color = lineColor.copy(alpha = 0.18f)) {
+                                                Text(
+                                                    lineName.take(3).uppercase(),
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = if (isLightColor(lineColor)) Color.Black else lineColor,
+                                                    fontSize = 9.sp,
+                                                )
+                                            }
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
@@ -1017,54 +1207,64 @@ private fun StationInfoCard(
                                                     overflow = TextOverflow.Ellipsis,
                                                 )
                                                 if (arrival.platform.isNotBlank()) {
-                                                    Text(
-                                                        arrival.platform,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    )
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(Icons.Filled.Schedule, null, modifier = Modifier.size(9.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Spacer(modifier = Modifier.width(3.dp))
+                                                        Text(
+                                                            arrival.platform,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                    }
                                                 }
                                             }
                                             Surface(
                                                 shape = RoundedCornerShape(8.dp),
-                                                color = when {
-                                                    arrival.timeToStationSeconds < 60 -> StatusSevere.copy(alpha = 0.12f)
-                                                    arrival.timeToStationSeconds < 180 -> StatusMinor.copy(alpha = 0.12f)
-                                                    else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-                                                },
+                                                color = urgency.copy(alpha = 0.12f),
                                             ) {
                                                 Text(
                                                     arrival.displayTime,
                                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                                     style = MaterialTheme.typography.labelSmall,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = when {
-                                                        arrival.timeToStationSeconds < 60 -> StatusSevere
-                                                        arrival.timeToStationSeconds < 180 -> StatusMinor
-                                                        else -> MaterialTheme.colorScheme.primary
-                                                    },
+                                                    color = urgency,
                                                 )
                                             }
                                         }
                                     }
                                 }
-                        }
+                            }
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // View details button
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.primary,
-                onClick = onViewDetails,
-            ) {
-                Row(modifier = Modifier.padding(14.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Train, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("View Station Details", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
+            // Action buttons row
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    onClick = onViewDetails,
+                ) {
+                    Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Train, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Station Details", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = Color.White)
+                    }
+                }
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                    onClick = onPlanRoute,
+                ) {
+                    Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Star, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Plan Route", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
         }
@@ -1092,27 +1292,38 @@ private fun isLightColor(color: Color): Boolean {
     return luminance > 0.6
 }
 
-private fun createStationBitmap(color: Color, stepFree: Boolean): android.graphics.Bitmap {
-    val size = 44
+private fun createStationBitmap(color: Color, stepFree: Boolean, selected: Boolean = false): android.graphics.Bitmap {
+    val size = if (selected) 56 else 46
+    val cx = size / 2f
+    val cy = size / 2f
     val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
 
-    // Outer ring
-    val ringPaint = android.graphics.Paint().apply { this.color = color.toArgb(); isAntiAlias = true; style = android.graphics.Paint.Style.STROKE; strokeWidth = 4f }
-    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 3f, ringPaint)
+    // Drop shadow
+    val shadowPaint = android.graphics.Paint().apply { this.color = android.graphics.Color.argb(50, 0, 0, 0); isAntiAlias = true; maskFilter = android.graphics.BlurMaskFilter(4f, android.graphics.BlurMaskFilter.Blur.NORMAL) }
+    canvas.drawCircle(cx + 1f, cy + 2f, cx - 4f, shadowPaint)
 
-    // Inner fill
-    val fillPaint = android.graphics.Paint().apply { this.color = Color.White.toArgb(); isAntiAlias = true }
-    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 7f, fillPaint)
+    // White background circle
+    val bgPaint = android.graphics.Paint().apply { this.color = Color.White.toArgb(); isAntiAlias = true }
+    canvas.drawCircle(cx, cy, cx - 3f, bgPaint)
 
-    // Center dot
-    val dotPaint = android.graphics.Paint().apply { this.color = color.toArgb(); isAntiAlias = true }
-    canvas.drawCircle(size / 2f, size / 2f, 6f, dotPaint)
+    // Colored outer ring — thick, TfL roundel style
+    val ringWidth = if (selected) 6f else 5f
+    val ringPaint = android.graphics.Paint().apply { this.color = color.toArgb(); isAntiAlias = true; style = android.graphics.Paint.Style.STROKE; strokeWidth = ringWidth }
+    canvas.drawCircle(cx, cy, cx - 3f - ringWidth / 2f, ringPaint)
 
-    // Step-free indicator (small green dot at bottom-right)
+    // Horizontal bar through center (roundel bar)
+    val barH = if (selected) 7f else 6f
+    val barPaint = android.graphics.Paint().apply { this.color = color.toArgb(); isAntiAlias = true }
+    val barRect = android.graphics.RectF(3f, cy - barH / 2f, size - 3f, cy + barH / 2f)
+    canvas.drawRoundRect(barRect, barH / 2f, barH / 2f, barPaint)
+
+    // Step-free indicator — small green dot at bottom-right
     if (stepFree) {
+        val sfBg = android.graphics.Paint().apply { this.color = Color.White.toArgb(); isAntiAlias = true }
+        canvas.drawCircle(size - 7f, size - 7f, 6f, sfBg)
         val sfPaint = android.graphics.Paint().apply { this.color = StatusGood.toArgb(); isAntiAlias = true }
-        canvas.drawCircle(size - 8f, size - 8f, 5f, sfPaint)
+        canvas.drawCircle(size - 7f, size - 7f, 4.5f, sfPaint)
     }
     return bitmap
 }
@@ -1141,6 +1352,122 @@ private fun createClusterBitmap(count: Int, color: Color): android.graphics.Bitm
         isAntiAlias = true; textAlign = android.graphics.Paint.Align.CENTER; isFakeBoldText = true
     }
     canvas.drawText(count.toString(), size / 2f, size / 2f + textPaint.textSize / 3f, textPaint)
+    return bitmap
+}
+
+private fun createUserLocationBitmap(): android.graphics.Bitmap {
+    val size = 52
+    val cx = size / 2f
+    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    // Drop shadow
+    val shadowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(80, 0, 0, 0)
+        maskFilter = android.graphics.BlurMaskFilter(6f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+    canvas.drawCircle(cx + 1.5f, cx + 2f, cx - 5f, shadowPaint)
+    // Outer white ring
+    val whitePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.FILL
+    }
+    canvas.drawCircle(cx, cx, cx - 3f, whitePaint)
+    // Blue fill
+    val bluePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(25, 118, 210); style = android.graphics.Paint.Style.FILL
+    }
+    canvas.drawCircle(cx, cx, cx - 7f, bluePaint)
+    // Inner white dot
+    val dotPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.FILL
+    }
+    canvas.drawCircle(cx, cx, 5.5f, dotPaint)
+    // Directional arrow hint (top wedge)
+    val arrowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(25, 118, 210); style = android.graphics.Paint.Style.FILL
+    }
+    val path = android.graphics.Path().apply {
+        moveTo(cx, 2f); lineTo(cx - 6f, 12f); lineTo(cx + 6f, 12f); close()
+    }
+    canvas.drawPath(path, whitePaint)
+    canvas.drawPath(path, arrowPaint)
+    return bitmap
+}
+
+private fun createRouteEndpointBitmap(argbColor: Int, label: String): android.graphics.Bitmap {
+    val size = 52
+    val cx = size / 2f
+    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    val shadowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(60, 0, 0, 0)
+        maskFilter = android.graphics.BlurMaskFilter(5f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+    canvas.drawCircle(cx + 1.5f, cx + 2f, cx - 4f, shadowPaint)
+    val fillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = argbColor }
+    canvas.drawCircle(cx, cx, cx - 4f, fillPaint)
+    val strokePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.STROKE; strokeWidth = 3.5f
+    }
+    canvas.drawCircle(cx, cx, cx - 4f, strokePaint)
+    val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE; textSize = 18f; isFakeBoldText = true
+        textAlign = android.graphics.Paint.Align.CENTER
+    }
+    canvas.drawText(label, cx, cx + textPaint.textSize / 3f, textPaint)
+    return bitmap
+}
+
+private fun createTrainBitmap(color: Color): android.graphics.Bitmap {
+    val w = 72; val h = 54
+    val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+
+    // Glow/shadow behind the body
+    val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color.toArgb()
+        maskFilter = android.graphics.BlurMaskFilter(8f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+        alpha = 120
+    }
+    canvas.drawRoundRect(android.graphics.RectF(4f, 6f, 68f, 38f), 10f, 10f, glowPaint)
+
+    // Main body
+    val bodyPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = color.toArgb() }
+    canvas.drawRoundRect(android.graphics.RectF(2f, 4f, 70f, 40f), 10f, 10f, bodyPaint)
+
+    // White border outline
+    val outlinePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.STROKE; strokeWidth = 2.5f
+    }
+    canvas.drawRoundRect(android.graphics.RectF(2f, 4f, 70f, 40f), 10f, 10f, outlinePaint)
+
+    // Windows row
+    val winPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = android.graphics.Color.argb(200, 220, 240, 255)
+    }
+    listOf(8f, 22f, 36f, 50f).forEach { x ->
+        canvas.drawRoundRect(android.graphics.RectF(x, 10f, x + 12f, 24f), 3f, 3f, winPaint)
+    }
+
+    // Headlight stripe on right end
+    val headPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = android.graphics.Color.argb(230, 255, 255, 180)
+    }
+    canvas.drawRoundRect(android.graphics.RectF(59f, 8f, 68f, 20f), 3f, 3f, headPaint)
+
+    // Wheels
+    val wheelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.rgb(40, 40, 40) }
+    val wheelShine = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.rgb(120, 120, 120) }
+    listOf(14f, 36f, 58f).forEach { x ->
+        canvas.drawCircle(x, 46f, 7f, wheelPaint)
+        canvas.drawCircle(x, 46f, 3.5f, wheelShine)
+    }
+
+    // Rail bar
+    val railPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = android.graphics.Color.rgb(80, 80, 80); strokeWidth = 3f; style = android.graphics.Paint.Style.STROKE
+    }
+    canvas.drawLine(4f, 46f, 68f, 46f, railPaint)
+
     return bitmap
 }
 

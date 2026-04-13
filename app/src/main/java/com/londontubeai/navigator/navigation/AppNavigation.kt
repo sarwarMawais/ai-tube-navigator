@@ -1,17 +1,22 @@
 package com.londontubeai.navigator.navigation
 
+import android.app.Activity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -36,6 +41,7 @@ import com.londontubeai.navigator.ui.screens.route.RouteScreen
 import com.londontubeai.navigator.ui.screens.settings.SettingsScreen
 import com.londontubeai.navigator.ui.screens.station.StationDetailScreen
 import com.londontubeai.navigator.ui.screens.station.StationListScreen
+import com.londontubeai.navigator.ui.screens.splash.AnimatedSplashScreen
 import com.londontubeai.navigator.ui.screens.status.StatusScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -45,6 +51,8 @@ fun AppNavigation(
     networkMonitor: NetworkMonitor? = null,
     startOnboarding: Boolean = false,
     appPreferences: AppPreferences? = null,
+    iconGradientStart: Color = Color(0xFF0A1628),
+    iconGradientEnd: Color = Color(0xFF003688),
 ) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -52,6 +60,21 @@ fun AppNavigation(
     val scope = rememberCoroutineScope()
 
     val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
+
+    // Set status bar icon color: white icons on dark-header screens, dark icons on light-header screens
+    val darkHeaderRoutes = remember {
+        setOf("home", "status", "stations", "settings", "nearby_detail")
+    }
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+            val useLightIcons = currentRoute != null &&
+                (darkHeaderRoutes.any { currentRoute == it } ||
+                 currentRoute.orEmpty().startsWith("station/"))
+            WindowInsetsControllerCompat(window, view).isAppearanceLightStatusBars = !useLightIcons
+        }
+    }
 
     // Observe connectivity
     var isOffline by remember { mutableStateOf(false) }
@@ -69,7 +92,8 @@ fun AppNavigation(
         }
     }
 
-    val startDest = if (startOnboarding) Screen.Onboarding.route else Screen.Home.route
+    val startDest = Screen.Splash.route
+    val afterSplashDest = if (startOnboarding) Screen.Onboarding.route else Screen.Home.route
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -87,6 +111,18 @@ fun AppNavigation(
                 startDestination = startDest,
                 modifier = Modifier.weight(1f),
             ) {
+                composable(Screen.Splash.route) {
+                    AnimatedSplashScreen(
+                        onSplashComplete = {
+                            navController.navigate(afterSplashDest) {
+                                popUpTo(Screen.Splash.route) { inclusive = true }
+                            }
+                        },
+                        iconGradientStart = iconGradientStart,
+                        iconGradientEnd = iconGradientEnd,
+                    )
+                }
+
                 composable(Screen.Onboarding.route) {
                     OnboardingScreen(
                         onComplete = {
