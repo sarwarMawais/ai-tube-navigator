@@ -180,6 +180,7 @@ data class JourneyRoute(
     val calorieBurned: Int = 0,
     val co2SavedGrams: Int = 0,
     val estimatedFarePounds: Double? = null,
+    val peakFarePounds: Double? = null,
     val isStepFreeRoute: Boolean = false,
 )
 

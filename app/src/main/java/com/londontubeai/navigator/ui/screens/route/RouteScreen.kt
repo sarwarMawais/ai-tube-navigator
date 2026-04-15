@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -545,7 +546,10 @@ fun RouteScreen(
                 }) { Text("Confirm") }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
+                androidx.compose.material3.TextButton(onClick = {
+                    showTimePicker = false
+                    viewModel.selectDepartureOption(DepartureOption.LEAVE_NOW)
+                }) { Text("Cancel") }
             },
             title = {
                 Text(
@@ -878,6 +882,9 @@ private fun RouteOptionsSection(
                         isSelected = index == selectedIndex,
                         extraMins = option.route.totalDurationMinutes - fastestDuration,
                         onSelect = { onSelectOption(index) },
+                        departureOption = departureOption,
+                        currentHour = currentHour,
+                        currentMinute = currentMinute,
                     )
                     if (index < options.size - 1) {
                         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)))
@@ -916,14 +923,32 @@ private fun RouteOptionCard(
     isSelected: Boolean,
     extraMins: Int,
     onSelect: () -> Unit,
+    departureOption: DepartureOption = DepartureOption.LEAVE_NOW,
+    currentHour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY),
+    currentMinute: Int = Calendar.getInstance().get(Calendar.MINUTE),
 ) {
     val route = option.route
-    val nowCal = remember { Calendar.getInstance() }
-    val arrivalCal = remember(route.totalDurationMinutes) {
-        Calendar.getInstance().apply { add(Calendar.MINUTE, route.totalDurationMinutes) }
+    val (departureTime, arrivalTime) = remember(departureOption, currentHour, currentMinute, route.totalDurationMinutes) {
+        val durMins = route.totalDurationMinutes
+        when (departureOption) {
+            DepartureOption.LEAVE_NOW -> {
+                val now = Calendar.getInstance()
+                val depH = now.get(Calendar.HOUR_OF_DAY); val depM = now.get(Calendar.MINUTE)
+                val arrTotal = depH * 60 + depM + durMins
+                "%02d:%02d".format(depH, depM) to "%02d:%02d".format((arrTotal / 60) % 24, arrTotal % 60)
+            }
+            DepartureOption.DEPART_AT -> {
+                val arrTotal = currentHour * 60 + currentMinute + durMins
+                "%02d:%02d".format(currentHour, currentMinute) to "%02d:%02d".format((arrTotal / 60) % 24, arrTotal % 60)
+            }
+            DepartureOption.ARRIVE_BY -> {
+                val depTotal = currentHour * 60 + currentMinute - durMins
+                val depH = ((depTotal / 60) % 24 + 24) % 24
+                val depM = ((depTotal % 60) + 60) % 60
+                "%02d:%02d".format(depH, depM) to "%02d:%02d".format(currentHour, currentMinute)
+            }
+        }
     }
-    val departureTime = String.format("%02d:%02d", nowCal.get(Calendar.HOUR_OF_DAY), nowCal.get(Calendar.MINUTE))
-    val arrivalTime = String.format("%02d:%02d", arrivalCal.get(Calendar.HOUR_OF_DAY), arrivalCal.get(Calendar.MINUTE))
     val durationLabel = formatDuration(route.totalDurationMinutes)
 
     Column(
@@ -1156,6 +1181,54 @@ private fun GoogleMapsTimelineCard(route: com.londontubeai.navigator.data.model.
                 Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
             }
 
+            // ── Fare + Step-free chips ────────────────────────────────────
+            val hasFare = route.estimatedFarePounds != null
+            val isStepFree = route.isStepFreeRoute
+            if (hasFare || isStepFree) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                ) {
+                    if (hasFare) {
+                        // Off-peak Oyster chip
+                        Surface(shape = RoundedCornerShape(8.dp), color = StatusGood.copy(alpha = 0.12f)) {
+                            Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "💳 Off-peak · £${"%.2f".format(route.estimatedFarePounds!!)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = StatusGood,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                        // Peak Oyster chip – only when different from off-peak
+                        val peak = route.peakFarePounds
+                        if (peak != null && peak != route.estimatedFarePounds) {
+                            Surface(shape = RoundedCornerShape(8.dp), color = StatusMinor.copy(alpha = 0.12f)) {
+                                Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "🕐 Peak · £${"%.2f".format(peak)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = StatusMinor,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (isStepFree) {
+                        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)) {
+                            Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.AutoMirrored.Filled.Accessible, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Step-free", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            }
+
             AnimatedVisibility(visible = expanded, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                 Column(modifier = Modifier.padding(top = 16.dp)) {
                     // Origin station dot
@@ -1245,6 +1318,7 @@ private fun TimelineDot(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TimelineSegment(
     color: Color,
@@ -1253,14 +1327,23 @@ private fun TimelineSegment(
     isDashed: Boolean = false,
     extras: List<String> = emptyList(),
 ) {
-    Row(modifier = Modifier.padding(vertical = 2.dp)) {
-        // Vertical line
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(13.dp)) {
+    Row(
+        modifier = Modifier
+            .padding(vertical = 2.dp)
+            .height(IntrinsicSize.Min),
+    ) {
+        // Vertical line — fills the full height of the content side
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.width(13.dp).fillMaxHeight(),
+        ) {
+            Spacer(modifier = Modifier.height(4.dp))
             Box(
-                modifier = Modifier.width(3.dp).height(if (extras.isEmpty()) 48.dp else 64.dp)
+                modifier = Modifier.width(3.dp).weight(1f)
                     .clip(RoundedCornerShape(2.dp))
                     .background(if (isDashed) color.copy(alpha = 0.4f) else color),
             )
+            Spacer(modifier = Modifier.height(4.dp))
         }
         Spacer(modifier = Modifier.width(12.dp))
         // Content
@@ -1269,7 +1352,7 @@ private fun TimelineSegment(
             shape = RoundedCornerShape(10.dp),
             color = color.copy(alpha = 0.07f),
         ) {
-            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(color))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -1278,11 +1361,20 @@ private fun TimelineSegment(
                     Text(subLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (extras.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        extras.take(2).forEach { extra ->
+                    Spacer(modifier = Modifier.height(5.dp))
+                    // Show all extras — wrap across rows on small screens
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        extras.forEach { extra ->
                             Surface(shape = RoundedCornerShape(6.dp), color = color.copy(alpha = 0.1f)) {
-                                Text(extra, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    extra,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = color,
+                                )
                             }
                         }
                     }

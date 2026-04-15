@@ -35,7 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AccessibleForward
+import androidx.compose.material.icons.automirrored.filled.AccessibleForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DirectionsBus
@@ -272,7 +272,7 @@ fun MapScreen(
             uiState.nearbyArrivals.forEach { (stationId, arrivals) ->
                 val destStation = TubeData.getStationById(stationId) ?: return@forEach
                 arrivals.arrivals
-                    .filter { it.timeToStationSeconds in 1..200 }
+                    .filter { it.timeToStationSeconds in 0..720 }
                     .forEach { arrival ->
                         val conn = connections.firstOrNull { c ->
                             (c.toStationId == stationId || c.fromStationId == stationId) &&
@@ -281,10 +281,11 @@ fun MapScreen(
                         val otherStationId = if (conn.toStationId == stationId) conn.fromStationId else conn.toStationId
                         val otherStation = TubeData.getStationById(otherStationId) ?: return@forEach
                         val adjustedSecs = (arrival.timeToStationSeconds - elapsedSec).coerceAtLeast(0f)
-                        val fraction = (1f - adjustedSecs / 160f).coerceIn(0.04f, 0.96f)
+                        val segmentSecs = (conn.travelTimeMinutes * 60).coerceAtLeast(60).toFloat()
+                        val fraction = (1f - adjustedSecs / segmentSecs).coerceIn(0.04f, 0.96f)
                         val trainLat = otherStation.latitude + fraction * (destStation.latitude - otherStation.latitude)
                         val trainLng = otherStation.longitude + fraction * (destStation.longitude - otherStation.longitude)
-                        add(Triple(LatLng(trainLat, trainLng), arrival.lineColor, arrival.lineName))
+                        add(Triple(LatLng(trainLat, trainLng), arrival.lineColor, arrival.lineId to arrival.lineName))
                     }
             }
         }
@@ -474,14 +475,16 @@ fun MapScreen(
             }
 
             // ── Live Train Markers ────────────────────────────────────────────
-            liveTrains.forEachIndexed { index, (position, color, lineName) ->
-                val key = "train_${color.toArgb()}"
+            liveTrains.forEachIndexed { index, (position, color, lineInfo) ->
+                val (lineId, lineName) = lineInfo
+                val key = "train_${lineId}_${color.toArgb()}"
+                val shortName = lineName.split(" ").firstOrNull()?.take(3)?.uppercase() ?: lineId.take(3).uppercase()
                 Marker(
                     state = MarkerState(position = position),
                     title = "🚂 $lineName",
                     snippet = "Live train approaching",
                     icon = bitmapCache.getOrPut(key) {
-                        BitmapDescriptorFactory.fromBitmap(createTrainBitmap(color))
+                        BitmapDescriptorFactory.fromBitmap(createTrainBitmap(color, shortName))
                     },
                     zIndex = 7f,
                     alpha = 0.95f,
@@ -1040,7 +1043,7 @@ private fun StationInfoCard(
                             Spacer(modifier = Modifier.width(6.dp))
                             Surface(shape = RoundedCornerShape(6.dp), color = StatusGood.copy(alpha = 0.12f)) {
                                 Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Filled.AccessibleForward, null, tint = StatusGood, modifier = Modifier.size(12.dp))
+                                    Icon(Icons.AutoMirrored.Filled.AccessibleForward, contentDescription = null, tint = StatusGood, modifier = Modifier.size(12.dp))
                                     Spacer(modifier = Modifier.width(2.dp))
                                     Text("Step-free", style = MaterialTheme.typography.labelSmall, color = StatusGood, fontSize = 10.sp)
                                 }
@@ -1417,56 +1420,72 @@ private fun createRouteEndpointBitmap(argbColor: Int, label: String): android.gr
     return bitmap
 }
 
-private fun createTrainBitmap(color: Color): android.graphics.Bitmap {
-    val w = 72; val h = 54
+private fun createTrainBitmap(color: Color, shortLabel: String = ""): android.graphics.Bitmap {
+    val w = 80; val h = 60
     val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
 
     // Glow/shadow behind the body
     val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.color = color.toArgb()
-        maskFilter = android.graphics.BlurMaskFilter(8f, android.graphics.BlurMaskFilter.Blur.NORMAL)
-        alpha = 120
+        maskFilter = android.graphics.BlurMaskFilter(9f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+        alpha = 110
     }
-    canvas.drawRoundRect(android.graphics.RectF(4f, 6f, 68f, 38f), 10f, 10f, glowPaint)
+    canvas.drawRoundRect(android.graphics.RectF(4f, 6f, 76f, 40f), 11f, 11f, glowPaint)
 
     // Main body
     val bodyPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = color.toArgb() }
-    canvas.drawRoundRect(android.graphics.RectF(2f, 4f, 70f, 40f), 10f, 10f, bodyPaint)
+    canvas.drawRoundRect(android.graphics.RectF(2f, 4f, 78f, 42f), 11f, 11f, bodyPaint)
 
     // White border outline
     val outlinePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.STROKE; strokeWidth = 2.5f
     }
-    canvas.drawRoundRect(android.graphics.RectF(2f, 4f, 70f, 40f), 10f, 10f, outlinePaint)
+    canvas.drawRoundRect(android.graphics.RectF(2f, 4f, 78f, 42f), 11f, 11f, outlinePaint)
 
-    // Windows row
-    val winPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = android.graphics.Color.argb(200, 220, 240, 255)
-    }
-    listOf(8f, 22f, 36f, 50f).forEach { x ->
-        canvas.drawRoundRect(android.graphics.RectF(x, 10f, x + 12f, 24f), 3f, 3f, winPaint)
+    // Line name label on the body (draw a white semi-transparent band first)
+    if (shortLabel.isNotEmpty()) {
+        val labelBgPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = android.graphics.Color.argb(140, 0, 0, 0)
+        }
+        canvas.drawRoundRect(android.graphics.RectF(8f, 10f, 72f, 28f), 6f, 6f, labelBgPaint)
+        val textColor = if (isLightColor(color)) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+        val labelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = android.graphics.Color.WHITE
+            textSize = 13f
+            isFakeBoldText = true
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+        canvas.drawText(shortLabel, 40f, 23f, labelPaint)
+    } else {
+        // Fallback: windows row
+        val winPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = android.graphics.Color.argb(200, 220, 240, 255)
+        }
+        listOf(8f, 24f, 40f, 56f).forEach { x ->
+            canvas.drawRoundRect(android.graphics.RectF(x, 10f, x + 13f, 24f), 3f, 3f, winPaint)
+        }
     }
 
-    // Headlight stripe on right end
+    // Headlight on right end
     val headPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.color = android.graphics.Color.argb(230, 255, 255, 180)
     }
-    canvas.drawRoundRect(android.graphics.RectF(59f, 8f, 68f, 20f), 3f, 3f, headPaint)
+    canvas.drawRoundRect(android.graphics.RectF(66f, 8f, 76f, 22f), 3f, 3f, headPaint)
 
     // Wheels
     val wheelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.rgb(40, 40, 40) }
-    val wheelShine = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.rgb(120, 120, 120) }
-    listOf(14f, 36f, 58f).forEach { x ->
-        canvas.drawCircle(x, 46f, 7f, wheelPaint)
-        canvas.drawCircle(x, 46f, 3.5f, wheelShine)
+    val wheelShine = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.rgb(130, 130, 130) }
+    listOf(15f, 40f, 65f).forEach { x ->
+        canvas.drawCircle(x, 50f, 7.5f, wheelPaint)
+        canvas.drawCircle(x, 50f, 3.5f, wheelShine)
     }
 
     // Rail bar
     val railPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.color = android.graphics.Color.rgb(80, 80, 80); strokeWidth = 3f; style = android.graphics.Paint.Style.STROKE
     }
-    canvas.drawLine(4f, 46f, 68f, 46f, railPaint)
+    canvas.drawLine(4f, 50f, 76f, 50f, railPaint)
 
     return bitmap
 }

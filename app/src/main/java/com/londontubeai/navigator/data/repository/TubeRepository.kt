@@ -578,7 +578,14 @@ class TubeRepository @Inject constructor(
             crowdPrediction = predictCrowding(fromStation.id, hour),
             calorieBurned = (totalDuration * 0.7).toInt(),
             co2SavedGrams = totalDuration * 14,
-            estimatedFarePounds = selectedJourney.fare?.totalCost?.let { it / 100.0 },
+            estimatedFarePounds = selectedJourney.fare?.totalCost?.takeIf { it > 0 }?.let { it / 100.0 }
+                ?: estimateFareFromZones(fromStation, toStation),
+            peakFarePounds = selectedJourney.fare?.fares
+                ?.filter { it.chargeLevel?.contains("off", ignoreCase = true) == false && it.chargeLevel?.contains("peak", ignoreCase = true) == true }
+                ?.mapNotNull { it.cost }
+                ?.maxOrNull()
+                ?.takeIf { it > 0 }?.let { it / 100.0 }
+                ?: estimatePeakFareFromZones(fromStation, toStation),
             isStepFreeRoute = isStepFree,
         )
     }
@@ -762,7 +769,78 @@ class TubeRepository @Inject constructor(
             crowdPrediction = crowdPred,
             calorieBurned = calories,
             co2SavedGrams = co2Saved,
+            estimatedFarePounds = estimateFareFromZones(fromStation, toStation),
+            peakFarePounds = estimatePeakFareFromZones(fromStation, toStation),
         )
+    }
+
+    /**
+     * Zone-based Oyster/contactless fare estimate using 2025/26 TfL off-peak single fares.
+     * Used as fallback when TfL API doesn't return fare data.
+     */
+    private fun estimateFareFromZones(from: Station, to: Station): Double? {
+        val fromZone = from.zone.split("/").mapNotNull { it.trim().toIntOrNull() }.minOrNull() ?: return null
+        val toZone = to.zone.split("/").mapNotNull { it.trim().toIntOrNull() }.minOrNull() ?: return null
+        val lo = minOf(fromZone, toZone)
+        val hi = maxOf(fromZone, toZone)
+        return when {
+            lo == 1 && hi == 1 -> 2.80
+            lo == 1 && hi == 2 -> 3.40
+            lo == 1 && hi == 3 -> 3.70
+            lo == 1 && hi == 4 -> 4.30
+            lo == 1 && hi == 5 -> 5.25
+            lo == 1 && hi == 6 -> 5.70
+            lo == 2 && hi == 2 -> 1.80
+            lo == 2 && hi == 3 -> 2.00
+            lo == 2 && hi == 4 -> 2.60
+            lo == 2 && hi == 5 -> 3.10
+            lo == 2 && hi == 6 -> 3.60
+            lo == 3 && hi == 3 -> 1.80
+            lo == 3 && hi == 4 -> 2.00
+            lo == 3 && hi == 5 -> 2.60
+            lo == 3 && hi == 6 -> 3.00
+            lo == 4 && hi == 4 -> 1.80
+            lo == 4 && hi == 5 -> 2.00
+            lo == 4 && hi == 6 -> 2.50
+            lo == 5 && hi == 5 -> 1.80
+            lo == 5 && hi == 6 -> 2.00
+            lo == 6 && hi == 6 -> 1.80
+            else -> null
+        }
+    }
+
+    /**
+     * Zone-based peak Oyster/contactless fare using 2025/26 TfL peak single fares.
+     */
+    private fun estimatePeakFareFromZones(from: Station, to: Station): Double? {
+        val fromZone = from.zone.split("/").mapNotNull { it.trim().toIntOrNull() }.minOrNull() ?: return null
+        val toZone = to.zone.split("/").mapNotNull { it.trim().toIntOrNull() }.minOrNull() ?: return null
+        val lo = minOf(fromZone, toZone)
+        val hi = maxOf(fromZone, toZone)
+        return when {
+            lo == 1 && hi == 1 -> 3.40
+            lo == 1 && hi == 2 -> 3.80
+            lo == 1 && hi == 3 -> 4.30
+            lo == 1 && hi == 4 -> 5.10
+            lo == 1 && hi == 5 -> 5.55
+            lo == 1 && hi == 6 -> 6.10
+            lo == 2 && hi == 2 -> 2.80
+            lo == 2 && hi == 3 -> 2.80
+            lo == 2 && hi == 4 -> 2.80
+            lo == 2 && hi == 5 -> 3.30
+            lo == 2 && hi == 6 -> 3.80
+            lo == 3 && hi == 3 -> 2.00
+            lo == 3 && hi == 4 -> 2.20
+            lo == 3 && hi == 5 -> 2.80
+            lo == 3 && hi == 6 -> 3.20
+            lo == 4 && hi == 4 -> 2.00
+            lo == 4 && hi == 5 -> 2.20
+            lo == 4 && hi == 6 -> 2.70
+            lo == 5 && hi == 5 -> 2.00
+            lo == 5 && hi == 6 -> 2.20
+            lo == 6 && hi == 6 -> 2.00
+            else -> null
+        }
     }
 
     private val stationPlatformData: Map<String, Map<String, String>> = mapOf(

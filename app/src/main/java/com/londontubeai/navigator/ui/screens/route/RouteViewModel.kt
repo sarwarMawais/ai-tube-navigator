@@ -351,11 +351,12 @@ class RouteViewModel @Inject constructor(
     fun selectPreference(preference: RoutePreference) {
         _uiState.value = _uiState.value.copy(selectedPreference = preference)
         val options = _uiState.value.routeOptions
-        if (options.isEmpty()) {
+        // Step-free requires a new TfL API call with accessibilityPreference param
+        if (options.isEmpty() || preference == RoutePreference.STEP_FREE) {
             tryCalculateRoute()
             return
         }
-        // Snap to matching option without full recalculation
+        // Snap to matching option without full recalculation for other preferences
         val targetLabel = when (preference) {
             RoutePreference.FASTEST -> "Fastest"
             RoutePreference.FEWEST_CHANGES -> "Fewer changes"
