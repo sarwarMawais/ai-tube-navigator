@@ -28,8 +28,10 @@ import com.londontubeai.navigator.data.remote.TflApiService
 import com.londontubeai.navigator.ml.DelayPredictionEngine
 import com.londontubeai.navigator.ml.CrowdPredictionEngine
 import com.londontubeai.navigator.ui.theme.TubeLineColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import java.util.Calendar
 import java.util.LinkedList
 import javax.inject.Inject
@@ -279,38 +281,111 @@ class TubeRepository @Inject constructor(
         }
 
         // Nominatim geocoder — free, covers all London addresses, hospitals, POIs
-        val nominatimResults = try {
-            val encoded = java.net.URLEncoder.encode("$query, London", "UTF-8")
-            val url = java.net.URL("https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=5&countrycodes=gb&bounded=1&viewbox=-0.51,51.69,0.33,51.28")
-            val conn = url.openConnection() as java.net.HttpURLConnection
-            conn.setRequestProperty("User-Agent", "AITubeNavigator/1.0")
-            conn.connectTimeout = 4000
-            conn.readTimeout = 4000
-            val json = conn.inputStream.bufferedReader().readText()
-            conn.disconnect()
-            val arr = org.json.JSONArray(json)
-            (0 until arr.length()).mapNotNull { i ->
-                val obj = arr.getJSONObject(i)
-                val lat = obj.optDouble("lat", Double.NaN).takeIf { !it.isNaN() } ?: return@mapNotNull null
-                val lon = obj.optDouble("lon", Double.NaN).takeIf { !it.isNaN() } ?: return@mapNotNull null
-                val displayName = obj.optString("display_name", "").split(",").take(2).joinToString(", ").trim()
-                if (displayName.isBlank()) return@mapNotNull null
-                val osmId = obj.optString("osm_id", "")
-                if (tubeNamesLower.any { displayName.lowercase().contains(it) }) return@mapNotNull null
-                Station(
-                    id = "place:osm:$osmId",
-                    name = displayName,
-                    lineIds = emptyList(),
-                    zone = "",
-                    latitude = lat,
-                    longitude = lon,
-                )
-            }
-        } catch (e: Exception) { emptyList() }
+        val nominatimResults = withContext(Dispatchers.IO) {
+            try {
+                val encoded = java.net.URLEncoder.encode("$query, London", "UTF-8")
+                val url = java.net.URL("https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=5&countrycodes=gb&bounded=1&viewbox=-0.51,51.69,0.33,51.28")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.setRequestProperty("User-Agent", "AITubeNavigator/1.0")
+                conn.connectTimeout = 4000
+                conn.readTimeout = 4000
+                val json = conn.inputStream.bufferedReader().readText()
+                conn.disconnect()
+                val arr = org.json.JSONArray(json)
+                (0 until arr.length()).mapNotNull { i ->
+                    val obj = arr.getJSONObject(i)
+                    val lat = obj.optDouble("lat", Double.NaN).takeIf { !it.isNaN() } ?: return@mapNotNull null
+                    val lon = obj.optDouble("lon", Double.NaN).takeIf { !it.isNaN() } ?: return@mapNotNull null
+                    val displayName = obj.optString("display_name", "").split(",").take(2).joinToString(", ").trim()
+                    if (displayName.isBlank()) return@mapNotNull null
+                    val osmId = obj.optString("osm_id", "")
+                    if (tubeNamesLower.any { displayName.lowercase().contains(it) }) return@mapNotNull null
+                    Station(
+                        id = "place:osm:$osmId",
+                        name = displayName,
+                        lineIds = emptyList(),
+                        zone = "",
+                        latitude = lat,
+                        longitude = lon,
+                    )
+                }
+            } catch (e: Exception) { emptyList() }
+        }
 
         val allNames = (tubeNamesLower + tflExtra.map { it.name.lowercase() }).toSet()
         val filteredNominatim = nominatimResults.filter { it.name.lowercase() !in allNames }
         (tubeMatches + tflExtra + filteredNominatim).take(10)
+    }
+
+    private suspend fun saveRouteToDb(fromStationId: String, toStationId: String, route: JourneyRoute) {
+        try {
+            val legsSummary = buildString {
+                append("[")
+                route.legs.forEachIndexed { i, leg ->
+                    if (i > 0) append(",")
+                    append("{")
+                    append("\"lineId\":\"${leg.line.id}\",")
+                    append("\"lineName\":\"${leg.line.name.replace("\"", "'")}\",")
+                    append("\"fromId\":\"${leg.fromStation.id}\",")
+                    append("\"fromName\":\"${leg.fromStation.name.replace("\"", "'")}\",")
+                    append("\"toId\":\"${leg.toStation.id}\",")
+                    append("\"toName\":\"${leg.toStation.name.replace("\"", "'")}\",")
+                    append("\"durationMin\":${leg.durationMinutes},")
+                    append("\"mode\":\"${leg.mode.name}\"")
+                    append("}")
+                }
+                append("]")
+            }
+            dao.insertCachedRoute(
+                com.londontubeai.navigator.data.local.entity.CachedRouteEntity(
+                    routeKey = "${fromStationId}_${toStationId}",
+                    fromStationId = fromStationId,
+                    fromStationName = route.fromStation.name,
+                    toStationId = toStationId,
+                    toStationName = route.toStation.name,
+                    totalDurationMinutes = route.totalDurationMinutes,
+                    totalInterchanges = route.totalInterchanges,
+                    legsSummary = legsSummary,
+                )
+            )
+        } catch (_: Exception) {}
+    }
+
+    private suspend fun loadRouteFromDb(fromStationId: String, toStationId: String): JourneyRoute? {
+        return try {
+            val entity = dao.getCachedRoute("${fromStationId}_${toStationId}") ?: return null
+            val fromStation = TubeData.getStationById(entity.fromStationId)
+                ?: Station(id = entity.fromStationId, name = entity.fromStationName, lineIds = emptyList(), zone = "", latitude = 0.0, longitude = 0.0)
+            val toStation = TubeData.getStationById(entity.toStationId)
+                ?: Station(id = entity.toStationId, name = entity.toStationName, lineIds = emptyList(), zone = "", latitude = 0.0, longitude = 0.0)
+            val arr = org.json.JSONArray(entity.legsSummary)
+            val legs = (0 until arr.length()).mapNotNull { i ->
+                val obj = arr.getJSONObject(i)
+                val fromLeg = TubeData.getStationById(obj.optString("fromId"))
+                    ?: Station(id = obj.optString("fromId"), name = obj.optString("fromName"), lineIds = emptyList(), zone = "", latitude = 0.0, longitude = 0.0)
+                val toLeg = TubeData.getStationById(obj.optString("toId"))
+                    ?: Station(id = obj.optString("toId"), name = obj.optString("toName"), lineIds = emptyList(), zone = "", latitude = 0.0, longitude = 0.0)
+                val lineId = obj.optString("lineId")
+                val line = TubeData.getLineById(lineId)
+                    ?: TubeLine(id = lineId, name = obj.optString("lineName"), color = TubeLineColors.Jubilee, stationIds = emptyList())
+                val mode = try { TransportMode.valueOf(obj.optString("mode", "TUBE")) } catch (_: Exception) { TransportMode.TUBE }
+                JourneyLeg(
+                    fromStation = fromLeg, toStation = toLeg, line = line,
+                    durationMinutes = obj.optInt("durationMin", 5),
+                    direction = "Towards ${toLeg.name}",
+                    intermediateStops = 0,
+                    stationIds = listOf(fromLeg.id, toLeg.id),
+                    mode = mode,
+                )
+            }
+            JourneyRoute(
+                fromStation = fromStation,
+                toStation = toStation,
+                legs = legs,
+                totalDurationMinutes = entity.totalDurationMinutes,
+                totalInterchanges = entity.totalInterchanges,
+            )
+        } catch (_: Exception) { null }
     }
 
     /**
@@ -355,12 +430,16 @@ class TubeRepository @Inject constructor(
         val routes = journeyResponse.journeys?.take(5)?.mapNotNull { journey ->
             try { mapTflJourneyToRoute(journey, resolved.fromStation, resolved.toStation, isStepFree) } catch (_: Exception) { null }
         } ?: emptyList()
-        routes.firstOrNull()?.let {
+        routes.firstOrNull()?.let { first ->
             lastRouteFromId = fromStationId
             lastRouteToId = toStationId
-            lastJourneyRoute = it
+            lastJourneyRoute = first
+            saveRouteToDb(fromStationId, toStationId, first)
         }
         routes
+    }.recoverCatching { err ->
+        val cached = loadRouteFromDb(fromStationId, toStationId)
+        if (cached != null) listOf(cached) else throw err
     }
 
     suspend fun fetchJourneyRouteFromTfl(

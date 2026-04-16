@@ -59,7 +59,9 @@ fun AppNavigation(
     val currentRoute = navBackStackEntry?.destination?.route
     val scope = rememberCoroutineScope()
 
-    val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
+    val showBottomBar = Screen.bottomNavItems.any { item ->
+        currentRoute == item.route || currentRoute?.startsWith(item.route + "?") == true
+    }
 
     // Set status bar icon color: white icons on dark-header screens, dark icons on light-header screens
     val darkHeaderRoutes = remember {
@@ -168,8 +170,19 @@ fun AppNavigation(
                     )
                 }
 
-                composable(Screen.Route.route) {
+                composable(
+                    route = "route?toId={toId}",
+                    arguments = listOf(
+                        navArgument("toId") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        },
+                    ),
+                ) { backStackEntry ->
+                    val initialToId = backStackEntry.arguments?.getString("toId")
                     RouteScreen(
+                        initialToStationId = initialToId,
                         onNavigateToMap = { fromId, toId ->
                             navController.navigate(Screen.TubeMap.createRoute(fromId, toId))
                         },
@@ -259,6 +272,9 @@ fun AppNavigation(
                         onBack = { navController.popBackStack() },
                         onStationClick = { stationId ->
                             navController.navigate(Screen.StationDetail.createRoute(stationId))
+                        },
+                        onNavigateToRoute = { stationId ->
+                            navController.navigate(Screen.Route.createRoute(stationId))
                         },
                         routeFromId = fromId,
                         routeToId = toId,

@@ -27,7 +27,9 @@ import androidx.compose.material.icons.automirrored.filled.AccessibleForward
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Contrast
@@ -116,6 +118,7 @@ fun SettingsScreen(
 ) {
     val prefs by viewModel.prefsState.collectAsStateWithLifecycle()
     val currentIconId by viewModel.currentIconId.collectAsStateWithLifecycle()
+    val isPremium by viewModel.isPremium.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -139,58 +142,107 @@ fun SettingsScreen(
         LazyColumn(
             contentPadding = PaddingValues(bottom = Spacing.lg),
         ) {
-            // ── Upgrade to Premium banner ──────────────────────
+            // ── Upgrade / Pro Active banner ────────────────────
             item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.xl, vertical = Spacing.md)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    Color(0xFFFF8F00),
-                                    Color(0xFFE65100),
+                if (isPremium) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.xl, vertical = Spacing.md)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(Color(0xFF1B5E20), Color(0xFF2E7D32))
+                                )
+                            ),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(Spacing.lg),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Filled.CheckCircle, null, tint = Color(0xFFA5D6A7), modifier = Modifier.size(26.dp))
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Pro is Active",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White,
+                                )
+                                Text(
+                                    "All features unlocked — thank you!",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White.copy(alpha = 0.80f),
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = Color.White.copy(alpha = 0.18f),
+                            ) {
+                                Text(
+                                    "PRO",
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFFA5D6A7),
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.xl, vertical = Spacing.md)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(Color(0xFFFF8F00), Color(0xFFE65100))
                                 )
                             )
-                        )
-                        .clickable(onClick = onNavigateToPremium),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(Spacing.lg),
-                        verticalAlignment = Alignment.CenterVertically,
+                            .clickable(onClick = onNavigateToPremium),
                     ) {
-                        Box(
-                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center,
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(Spacing.lg),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(Icons.Filled.Star, null, tint = Color(0xFFFFECB3), modifier = Modifier.size(26.dp))
-                        }
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "Upgrade to Pro",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                            )
-                            Text(
-                                "Unlock AI predictions, live alerts & more",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.88f),
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = Color.White.copy(alpha = 0.22f),
-                        ) {
-                            Text(
-                                "Get Pro",
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                            )
+                            Box(
+                                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Filled.Star, null, tint = Color(0xFFFFECB3), modifier = Modifier.size(26.dp))
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Upgrade to Pro",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White,
+                                )
+                                Text(
+                                    "Unlock AI predictions, live alerts & more",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White.copy(alpha = 0.88f),
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = Color.White.copy(alpha = 0.22f),
+                            ) {
+                                Text(
+                                    "Get Pro",
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                )
+                            }
                         }
                     }
                 }
@@ -372,14 +424,24 @@ fun SettingsScreen(
                         onToggle = { scope.launch { viewModel.setPushCommute(it) } },
                     )
                     SettingsDivider()
-                    SettingsToggle(
-                        title = "AI Tips & Insights",
-                        description = "Personalised AI-powered travel suggestions",
-                        icon = Icons.Filled.Lightbulb,
-                        iconColor = Color(0xFFFFA000),
-                        checked = prefs.pushAiTips,
-                        onToggle = { scope.launch { viewModel.setPushAiTips(it) } },
-                    )
+                    if (isPremium) {
+                        SettingsToggle(
+                            title = "AI Tips & Insights",
+                            description = "Personalised AI-powered travel suggestions",
+                            icon = Icons.Filled.Lightbulb,
+                            iconColor = Color(0xFFFFA000),
+                            checked = prefs.pushAiTips,
+                            onToggle = { scope.launch { viewModel.setPushAiTips(it) } },
+                        )
+                    } else {
+                        SettingsLockedRow(
+                            title = "AI Tips & Insights",
+                            description = "Personalised AI-powered travel suggestions",
+                            icon = Icons.Filled.Lightbulb,
+                            iconColor = Color(0xFFFFA000),
+                            onTap = onNavigateToPremium,
+                        )
+                    }
                     if (prefs.pushDisruptions || prefs.pushCommute || prefs.pushAiTips) {
                         SettingsDivider()
                         SettingsToggle(
@@ -901,6 +963,77 @@ private fun SettingsToggle(
                 checkedThumbColor = Color.White,
             ),
         )
+    }
+}
+
+@Composable
+private fun SettingsLockedRow(
+    title: String,
+    description: String,
+    icon: ImageVector,
+    iconColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    onTap: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onTap)
+            .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(iconColor.copy(alpha = 0.08f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconColor.copy(alpha = 0.4f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                fontSize = 11.sp,
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = Color(0xFFFF8F00).copy(alpha = 0.12f),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Lock,
+                    null,
+                    tint = Color(0xFFFF8F00),
+                    modifier = Modifier.size(11.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "Pro",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFFF8F00),
+                )
+            }
+        }
     }
 }
 

@@ -8,6 +8,7 @@ import com.londontubeai.navigator.data.model.CrowdPrediction
 import com.londontubeai.navigator.data.model.JourneyRoute
 import com.londontubeai.navigator.data.model.Station
 import com.londontubeai.navigator.data.model.TubeData
+import com.londontubeai.navigator.data.billing.BillingManager
 import com.londontubeai.navigator.data.preferences.AppPreferences
 import com.londontubeai.navigator.data.repository.TubeRepository
 import com.londontubeai.navigator.ml.CrowdPredictionEngine
@@ -21,6 +22,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -107,7 +110,12 @@ class RouteViewModel @Inject constructor(
     private val prefs: AppPreferences,
     private val locationService: LocationService,
     val reviewManager: AppReviewManager,
+    private val billingManager: BillingManager,
 ) : ViewModel() {
+
+    val isPremium: StateFlow<Boolean> = billingManager.billingState
+        .map { it.isPremium }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     private val _uiState = MutableStateFlow(RouteUiState())
     val uiState: StateFlow<RouteUiState> = _uiState.asStateFlow()
@@ -118,6 +126,22 @@ class RouteViewModel @Inject constructor(
 
     init {
         checkLocation()
+        applyPreferencesDefaults()
+    }
+
+    private fun applyPreferencesDefaults() {
+        viewModelScope.launch {
+            val stepFree = prefs.preferStepFree.first()
+            val lessWalking = prefs.preferLessWalking.first()
+            val defaultPref = when {
+                stepFree -> RoutePreference.STEP_FREE
+                lessWalking -> RoutePreference.LEAST_WALKING
+                else -> RoutePreference.FASTEST
+            }
+            if (defaultPref != RoutePreference.FASTEST) {
+                _uiState.value = _uiState.value.copy(selectedPreference = defaultPref)
+            }
+        }
     }
 
     private fun checkLocation(autoPopulateFrom: Boolean = true) {
@@ -301,6 +325,12 @@ class RouteViewModel @Inject constructor(
             routeCalculated = false,
         )
         tryCalculateRoute()
+    }
+
+    fun preSelectToStation(stationId: String) {
+        val station = TubeData.getStationById(stationId) ?: return
+        if (_uiState.value.toStation?.id == stationId) return
+        selectToStation(station)
     }
 
     fun setFromFieldFocused(focused: Boolean) {

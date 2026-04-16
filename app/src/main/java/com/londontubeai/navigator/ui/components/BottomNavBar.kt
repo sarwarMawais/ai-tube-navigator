@@ -69,7 +69,8 @@ fun BottomNavBar(navController: NavController) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Screen.bottomNavItems.forEach { screen ->
-                val selected = currentRoute == screen.route
+                val selected = currentRoute == screen.route ||
+                    currentRoute?.startsWith(screen.route + "?") == true
 
                 val iconScale by animateFloatAsState(
                     targetValue = if (selected) 1.1f else 1f,
@@ -100,7 +101,9 @@ fun BottomNavBar(navController: NavController) {
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                         ) {
-                            if (currentRoute != screen.route) {
+                            val alreadyHere = currentRoute == screen.route ||
+                                currentRoute?.startsWith(screen.route + "?") == true
+                            if (!alreadyHere) {
                                 navController.navigate(screen.route) {
                                     popUpTo(Screen.Home.route) { saveState = true }
                                     launchSingleTop = true

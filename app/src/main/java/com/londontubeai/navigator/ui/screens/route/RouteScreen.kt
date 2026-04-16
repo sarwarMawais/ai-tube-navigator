@@ -64,6 +64,7 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Place
@@ -158,15 +159,23 @@ import java.util.Calendar
 fun RouteScreen(
     viewModel: RouteViewModel = hiltViewModel(),
     onNavigateToMap: (String, String) -> Unit = { _, _ -> },
+    initialToStationId: String? = null,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val recentJourneys by viewModel.recentJourneys.collectAsStateWithLifecycle()
+    val isPremium by viewModel.isPremium.collectAsStateWithLifecycle()
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var showTimePicker by remember { mutableStateOf(false) }
+
+    LaunchedEffect(initialToStationId) {
+        if (!initialToStationId.isNullOrBlank()) {
+            viewModel.preSelectToStation(initialToStationId)
+        }
+    }
 
     LaunchedEffect(uiState.routeCalculated) {
         if (uiState.routeCalculated) {
@@ -370,54 +379,87 @@ fun RouteScreen(
                     }
                 }
 
-                // Crowd Prediction
+                // Crowd Prediction (premium-gated)
                 val crowd = uiState.crowdPrediction
                 if (crowd != null) {
                     item {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                            shape = RoundedCornerShape(18.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            shadowElevation = 3.dp,
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                    Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(crowdColor(crowd.crowdLevel).copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Filled.Group, null, tint = crowdColor(crowd.crowdLevel), modifier = Modifier.size(18.dp))
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Crowd Prediction", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        CrowdPredictionEngine.DayType.entries.forEach { dayType ->
-                                            val sel = uiState.selectedCrowdDayType == dayType
-                                            val lbl = when (dayType) {
-                                                CrowdPredictionEngine.DayType.AUTO -> "Auto"
-                                                CrowdPredictionEngine.DayType.WEEKDAY -> "WD"
-                                                CrowdPredictionEngine.DayType.WEEKEND -> "WE"
-                                            }
-                                            Surface(
-                                                onClick = { viewModel.selectCrowdDayType(dayType) },
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = if (sel) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
-                                                border = BorderStroke(1.dp, if (sel) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                                            ) {
-                                                Text(lbl, modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal, color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (isPremium) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                shadowElevation = 3.dp,
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                        Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(crowdColor(crowd.crowdLevel).copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Filled.Group, null, tint = crowdColor(crowd.crowdLevel), modifier = Modifier.size(18.dp))
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text("Crowd Prediction", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            CrowdPredictionEngine.DayType.entries.forEach { dayType ->
+                                                val sel = uiState.selectedCrowdDayType == dayType
+                                                val lbl = when (dayType) {
+                                                    CrowdPredictionEngine.DayType.AUTO -> "Auto"
+                                                    CrowdPredictionEngine.DayType.WEEKDAY -> "WD"
+                                                    CrowdPredictionEngine.DayType.WEEKEND -> "WE"
+                                                }
+                                                Surface(
+                                                    onClick = { viewModel.selectCrowdDayType(dayType) },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    color = if (sel) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
+                                                    border = BorderStroke(1.dp, if (sel) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                                                ) {
+                                                    Text(lbl, modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal, color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                Spacer(modifier = Modifier.height(14.dp))
-                                val animatedCrowdFill by animateFloatAsState(targetValue = crowd.percentageFull / 100f, animationSpec = tween(800), label = "crowdFill")
-                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(crowd.crowdLevel.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = crowdColor(crowd.crowdLevel), modifier = Modifier.width(92.dp))
-                                    Box(modifier = Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
-                                        Box(modifier = Modifier.fillMaxWidth(animatedCrowdFill).fillMaxHeight().clip(RoundedCornerShape(5.dp)).background(Brush.horizontalGradient(listOf(crowdColor(crowd.crowdLevel).copy(alpha = 0.7f), crowdColor(crowd.crowdLevel)))))
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    val animatedCrowdFill by animateFloatAsState(targetValue = crowd.percentageFull / 100f, animationSpec = tween(800), label = "crowdFill")
+                                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(crowd.crowdLevel.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = crowdColor(crowd.crowdLevel), modifier = Modifier.width(92.dp))
+                                        Box(modifier = Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                                            Box(modifier = Modifier.fillMaxWidth(animatedCrowdFill).fillMaxHeight().clip(RoundedCornerShape(5.dp)).background(Brush.horizontalGradient(listOf(crowdColor(crowd.crowdLevel).copy(alpha = 0.7f), crowdColor(crowd.crowdLevel)))))
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text("${crowd.percentageFull}%", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = crowdColor(crowd.crowdLevel))
                                     }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text("${crowd.percentageFull}%", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = crowdColor(crowd.crowdLevel))
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(crowd.recommendation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp)
                                 }
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(crowd.recommendation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp)
+                            }
+                        } else {
+                            // Premium teaser
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
+                                shadowElevation = 0.dp,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(Icons.Filled.Lock, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Crowd Prediction", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                        Text("Upgrade to Pro for AI crowd forecasts", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.primary,
+                                    ) {
+                                        Text("Pro", modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                                    }
+                                }
                             }
                         }
                     }

@@ -2,6 +2,8 @@ package com.londontubeai.navigator.ui.screens.map
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.ui.graphics.Color
+import com.londontubeai.navigator.data.local.entity.CachedLineStatusEntity
 import com.londontubeai.navigator.data.model.JourneyRoute
 import com.londontubeai.navigator.data.model.LineStatus
 import com.londontubeai.navigator.data.model.NaptanIds
@@ -17,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 data class MapUiState(
@@ -31,6 +34,8 @@ data class MapUiState(
     val arrivalsError: Boolean = false,
     val lineStatuses: List<LineStatus> = emptyList(),
     val isLoadingStatuses: Boolean = false,
+    val isUsingCachedStatuses: Boolean = false,
+    val offlineMessage: String? = null,
     val nearbyArrivals: Map<String, StationArrivals> = emptyMap(),
     val nearbyArrivalsUpdatedAt: Long = 0L,
 )
@@ -44,9 +49,14 @@ class MapViewModel @Inject constructor(
     val uiState: StateFlow<MapUiState> = _uiState.asStateFlow()
 
     private var arrivalsJob: Job? = null
+    private var isScreenActive = true
 
     companion object {
         private const val ARRIVALS_REFRESH_MS = 15_000L
+    }
+
+    fun setActive(active: Boolean) {
+        isScreenActive = active
     }
 
     init {
@@ -55,7 +65,7 @@ class MapViewModel @Inject constructor(
         viewModelScope.launch {
             while (true) {
                 delay(ARRIVALS_REFRESH_MS)
-                loadNearbyArrivals()
+                if (isScreenActive) loadNearbyArrivals()
             }
         }
     }
@@ -68,10 +78,26 @@ class MapViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(
                         lineStatuses = statuses,
                         isLoadingStatuses = false,
+                        isUsingCachedStatuses = false,
+                        offlineMessage = null,
                     )
                 }
                 .onFailure {
-                    _uiState.value = _uiState.value.copy(isLoadingStatuses = false)
+                    val cached = repository.getCachedLineStatuses().first()
+                    if (cached.isNotEmpty()) {
+                        _uiState.value = _uiState.value.copy(
+                            lineStatuses = cached.map { it.toLineStatus() },
+                            isLoadingStatuses = false,
+                            isUsingCachedStatuses = true,
+                            offlineMessage = "Offline · showing cached status",
+                        )
+                    } else {
+                        _uiState.value = _uiState.value.copy(
+                            isLoadingStatuses = false,
+                            isUsingCachedStatuses = false,
+                            offlineMessage = "Could not load line statuses. Check your connection.",
+                        )
+                    }
                 }
         }
     }
@@ -146,24 +172,38 @@ class MapViewModel @Inject constructor(
         if (NaptanIds.forStation(station.id) != null) {
             arrivalsJob = viewModelScope.launch {
                 while (true) {
-                    repository.fetchStationArrivals(station.id)
-                        .onSuccess { arrivals ->
-                            _uiState.value = _uiState.value.copy(
-                                stationArrivals = arrivals,
-                                isLoadingArrivals = false,
-                                arrivalsError = false,
-                            )
-                        }
-                        .onFailure {
-                            _uiState.value = _uiState.value.copy(
-                                isLoadingArrivals = false,
-                                arrivalsError = _uiState.value.stationArrivals == null,
-                            )
-                        }
+                    if (isScreenActive) {
+                        repository.fetchStationArrivals(station.id)
+                            .onSuccess { arrivals ->
+                                _uiState.value = _uiState.value.copy(
+                                    stationArrivals = arrivals,
+                                    isLoadingArrivals = false,
+                                    arrivalsError = false,
+                                )
+                            }
+                            .onFailure {
+                                _uiState.value = _uiState.value.copy(
+                                    isLoadingArrivals = false,
+                                    arrivalsError = _uiState.value.stationArrivals == null,
+                                )
+                            }
+                    }
                     delay(ARRIVALS_REFRESH_MS)
                 }
             }
         }
+    }
+
+    private fun CachedLineStatusEntity.toLineStatus(): LineStatus {
+        val tubeColor = TubeData.getLineById(lineId)?.color ?: Color.Gray
+        return LineStatus(
+            lineId = lineId,
+            lineName = lineName,
+            statusSeverity = statusSeverity,
+            statusDescription = statusDescription,
+            reason = reason,
+            lineColor = tubeColor,
+        )
     }
 
     fun loadJourney(fromId: String?, toId: String?) {

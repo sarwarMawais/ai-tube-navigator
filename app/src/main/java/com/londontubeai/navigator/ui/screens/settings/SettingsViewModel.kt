@@ -8,6 +8,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.londontubeai.navigator.data.billing.BillingManager
 import com.londontubeai.navigator.data.local.dao.TubeDao
 import com.londontubeai.navigator.data.model.TubeData
 import com.londontubeai.navigator.data.notifications.DisruptionCheckWorker
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -55,7 +57,16 @@ class SettingsViewModel @Inject constructor(
     private val dao: TubeDao,
     private val app: Application,
     private val iconManager: AppIconManager,
+    private val billingManager: BillingManager,
 ) : ViewModel() {
+
+    init {
+        billingManager.startConnection()
+    }
+
+    val isPremium: kotlinx.coroutines.flow.StateFlow<Boolean> = billingManager.billingState
+        .map { it.isPremium }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     private val _currentIconId = MutableStateFlow(iconManager.getCurrentIconId())
     val currentIconId = _currentIconId.asStateFlow()

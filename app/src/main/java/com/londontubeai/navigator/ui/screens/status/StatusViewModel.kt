@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -141,6 +142,7 @@ data class LineStatusUiModel(
 
 // ── ViewModel ───────────────────────────────────────────
 
+@OptIn(FlowPreview::class)
 @HiltViewModel
 class StatusViewModel @Inject constructor(
     private val repository: TubeRepository,
@@ -253,7 +255,6 @@ class StatusViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(userProfile = newProfile)
         viewModelScope.launch {
             prefs.setFavouriteLines(updated.joinToString(","))
-            repository.saveUserProfile(newProfile)
         }
     }
 

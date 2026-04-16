@@ -170,16 +170,13 @@ class HomeViewModel @Inject constructor(
             locationService.getCurrentLocation()
                 .onSuccess { location ->
                     try {
-                        Log.d("Weather", "Getting weather for lat: ${location.latitude}, lng: ${location.longitude}")
                         val response = weatherApi.getCurrentWeather(
                             latitude = location.latitude,
                             longitude = location.longitude,
                         )
-                        Log.d("Weather", "API response: temp=${response.current.temperature}, code=${response.current.weatherCode}")
                         val impact = mapWeatherCodeToImpact(response.current.weatherCode)
                         val condition = mapWeatherCodeToCondition(response.current.weatherCode)
                         val icon = mapWeatherCodeToIcon(response.current.weatherCode)
-                        Log.d("Weather", "Mapped: condition=$condition, icon=$icon, impact=$impact")
                         _uiState.value = _uiState.value.copy(
                             weatherInfo = WeatherInfo(
                                 temperature = response.current.temperature.toInt(),
@@ -195,15 +192,12 @@ class HomeViewModel @Inject constructor(
                     }
                     // Fallback: use London coords
                     try {
-                        Log.d("Weather", "Using fallback London coords")
                         val response = weatherApi.getCurrentWeather(
                             latitude = 51.5074, longitude = -0.1278,
                         )
-                        Log.d("Weather", "Fallback API response: temp=${response.current.temperature}, code=${response.current.weatherCode}")
                         val impact = mapWeatherCodeToImpact(response.current.weatherCode)
                         val condition = mapWeatherCodeToCondition(response.current.weatherCode)
                         val icon = mapWeatherCodeToIcon(response.current.weatherCode)
-                        Log.d("Weather", "Fallback mapped: condition=$condition, icon=$icon, impact=$impact")
                         _uiState.value = _uiState.value.copy(
                             weatherInfo = WeatherInfo(
                                 temperature = response.current.temperature.toInt(),
@@ -217,7 +211,6 @@ class HomeViewModel @Inject constructor(
                     } catch (e: Exception) {
                         Log.e("Weather", "Fallback API call failed: ${e.message}")
                     }
-                    Log.d("Weather", "Using hardcoded fallback weather")
                     setFallbackWeather()
                 }
                 .onFailure {
@@ -527,7 +520,6 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun loadNearbyArrivals() {
-        Log.d("NearbyArrivals", "Starting nearby arrivals loading...")
         _uiState.value = _uiState.value.copy(
             isNearbyLoading = true,
             nearbyStatusMessage = "Finding nearby stations...",
@@ -536,11 +528,8 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             locationService.getCurrentLocation()
                 .onSuccess { location ->
-                    Log.d("NearbyArrivals", "Location: ${location.latitude}, ${location.longitude}")
-
                     // Check if user is within London
                     if (!isInLondon(location.latitude, location.longitude)) {
-                        Log.d("NearbyArrivals", "User is outside London")
                         _uiState.value = _uiState.value.copy(
                             nearbyStationArrivals = emptyList(),
                             isNearbyLoading = false,
@@ -567,8 +556,6 @@ class HomeViewModel @Inject constructor(
                         .take(5)
                         .filter { it.second < MAX_NEARBY_DISTANCE_KM }
 
-                    Log.d("NearbyArrivals", "Found ${nearestStations.size} stations within ${MAX_NEARBY_DISTANCE_KM}km")
-
                     if (nearestStations.isEmpty()) {
                         _uiState.value = _uiState.value.copy(
                             nearbyStationArrivals = emptyList(),
@@ -582,7 +569,6 @@ class HomeViewModel @Inject constructor(
                     // Fetch real arrivals from TfL API for nearest stations
                     val arrivals = mutableListOf<NearbyArrival>()
                     nearestStations.forEach { (station, distance) ->
-                        Log.d("NearbyArrivals", "Fetching arrivals for ${station.name} (${distance.format(2)}km)")
                         repository.fetchStationArrivals(station.id)
                             .onSuccess { stationArrivals ->
                                 stationArrivals.arrivals
@@ -609,7 +595,6 @@ class HomeViewModel @Inject constructor(
                                         )
                                     )
                                     }
-                                Log.d("NearbyArrivals", "Got ${stationArrivals.arrivals.size} arrivals for ${station.name}")
                             }
                             .onFailure { error ->
                                 Log.e("NearbyArrivals", "Failed for ${station.name}: ${error.message}")
@@ -634,7 +619,6 @@ class HomeViewModel @Inject constructor(
                         isNearbyUsingFallback = false,
                         isOutsideLondon = false,
                     )
-                    Log.d("NearbyArrivals", "Total arrivals: ${sortedArrivals.size}")
                 }
                 .onFailure { error ->
                     Log.e("NearbyArrivals", "Location failed: ${error.message}")
@@ -647,8 +631,6 @@ class HomeViewModel @Inject constructor(
                 }
         }
     }
-
-    private fun Double.format(digits: Int): String = "%.${digits}f".format(this)
 
     fun retryNearbyArrivals() {
         loadNearbyArrivals()
@@ -744,10 +726,8 @@ class HomeViewModel @Inject constructor(
 
     fun onPermissionsChanged(permissionsState: PermissionsState) {
         if (permissionsState.locationPermissionGranted) {
-            Log.d("NearbyArrivals", "✅ Location permission granted, loading nearby arrivals")
             loadNearbyArrivals()
         } else {
-            Log.d("NearbyArrivals", "🚫 Location permission missing, clearing nearby arrivals")
             _uiState.value = _uiState.value.copy(
                 nearbyStationArrivals = emptyList(),
                 isNearbyUsingFallback = false,
@@ -757,14 +737,8 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadCachedStatuses(): List<LineStatus> {
-        val cachedList = mutableListOf<LineStatus>()
-        repository.getCachedLineStatuses().collect { entities ->
-            cachedList.addAll(entities.map { it.toLineStatus() })
-            return@collect
-        }
-        return cachedList
-    }
+    private suspend fun loadCachedStatuses(): List<LineStatus> =
+        repository.getCachedLineStatuses().first().map { it.toLineStatus() }
 
     private fun CachedLineStatusEntity.toLineStatus(): LineStatus {
         val tubeColor = TubeData.getLineById(lineId)?.color

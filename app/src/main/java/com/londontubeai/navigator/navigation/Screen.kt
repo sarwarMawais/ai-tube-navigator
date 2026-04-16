@@ -31,7 +31,10 @@ sealed class Screen(
         title = "Route",
         selectedIcon = Icons.Filled.Explore,
         unselectedIcon = Icons.Outlined.Explore,
-    )
+    ) {
+        fun createRoute(toId: String? = null): String =
+            if (!toId.isNullOrBlank()) "route?toId=$toId" else route
+    }
 
     data object Status : Screen(
         route = "status",

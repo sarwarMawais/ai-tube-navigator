@@ -38,6 +38,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.AccessibleForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DirectionsSubway
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Layers
@@ -65,6 +67,7 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -137,6 +140,7 @@ private enum class MapStyle(val label: String, val icon: ImageVector, val mapTyp
 fun MapScreen(
     onBack: () -> Unit = {},
     onStationClick: (String) -> Unit = {},
+    onNavigateToRoute: (String) -> Unit = {},
     routeFromId: String? = null,
     routeToId: String? = null,
     viewModel: MapViewModel = hiltViewModel(),
@@ -158,6 +162,12 @@ fun MapScreen(
     var showSearch by remember { mutableStateOf(false) }
     var mapStyle by remember { mutableStateOf(MapStyle.NORMAL) }
     var showMapStylePicker by remember { mutableStateOf(false) }
+    var longPressLatLng by remember { mutableStateOf<com.google.android.gms.maps.model.LatLng?>(null) }
+
+    DisposableEffect(Unit) {
+        viewModel.setActive(true)
+        onDispose { viewModel.setActive(false) }
+    }
 
     LaunchedEffect(routeFromId, routeToId) {
         viewModel.loadJourney(routeFromId, routeToId)
@@ -274,11 +284,14 @@ fun MapScreen(
                 arrivals.arrivals
                     .filter { it.timeToStationSeconds in 0..720 }
                     .forEach { arrival ->
+                        // Prefer connection where train is physically travelling TO stationId
                         val conn = connections.firstOrNull { c ->
+                            c.toStationId == stationId && c.lineId == arrival.lineId
+                        } ?: connections.firstOrNull { c ->
                             (c.toStationId == stationId || c.fromStationId == stationId) &&
                             c.lineId == arrival.lineId
                         } ?: return@forEach
-                        val otherStationId = if (conn.toStationId == stationId) conn.fromStationId else conn.toStationId
+                        val otherStationId = conn.fromStationId
                         val otherStation = TubeData.getStationById(otherStationId) ?: return@forEach
                         val adjustedSecs = (arrival.timeToStationSeconds - elapsedSec).coerceAtLeast(0f)
                         val segmentSecs = (conn.travelTimeMinutes * 60).coerceAtLeast(60).toFloat()
@@ -320,6 +333,12 @@ fun MapScreen(
                 showSearch = false
                 searchQuery = ""
                 showMapStylePicker = false
+                longPressLatLng = null
+            },
+            onMapLongClick = { latLng ->
+                longPressLatLng = latLng
+                selectedStation = null
+                viewModel.selectStation(null)
             },
         ) {
             // Draw tube line polylines — hidden when a journey route is active for clarity
@@ -971,6 +990,113 @@ fun MapScreen(
             }
         }
 
+        // ── Offline / cached-status banner ───────────────────────────────
+        AnimatedVisibility(
+            visible = uiState.offlineMessage != null,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 80.dp, start = Spacing.screenHorizontal, end = Spacing.screenHorizontal),
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+        ) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (uiState.isUsingCachedStatuses) StatusMinor.copy(alpha = 0.92f) else StatusSevere.copy(alpha = 0.92f),
+                shadowElevation = 6.dp,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (uiState.isUsingCachedStatuses) Icons.Filled.Info else Icons.Filled.Info,
+                        null,
+                        tint = Color.White,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        uiState.offlineMessage ?: "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+        }
+
+        // ── Long-press contextual action sheet ───────────────────────────
+        AnimatedVisibility(
+            visible = longPressLatLng != null,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 14.dp),
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Box(modifier = Modifier.align(Alignment.CenterHorizontally).width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Map location", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    longPressLatLng?.let {
+                        Text(
+                            "${"%,.5f".format(it.latitude)}, ${"%,.5f".format(it.longitude)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            onClick = {
+                                // Capture before clearing
+                                val lp = longPressLatLng
+                                longPressLatLng = null
+                                if (lp != null) {
+                                    val nearest = TubeData.getAllStationsSorted().minByOrNull {
+                                        val dlat = it.latitude - lp.latitude
+                                        val dlng = it.longitude - lp.longitude
+                                        dlat * dlat + dlng * dlng
+                                    }
+                                    nearest?.let { onNavigateToRoute(it.id) }
+                                }
+                            },
+                        ) {
+                            Row(modifier = Modifier.padding(11.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.DirectionsSubway, null, tint = Color.White, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("Route from here", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = Color.White)
+                            }
+                        }
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            onClick = { longPressLatLng = null },
+                        ) {
+                            Row(modifier = Modifier.padding(11.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Close, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("Dismiss", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Station bottom sheet ─────────────────────────────────────────
         AnimatedVisibility(
             visible = selectedStation != null,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -984,12 +1110,13 @@ fun MapScreen(
                     isLoadingArrivals = uiState.isLoadingArrivals,
                     arrivalsError = uiState.arrivalsError,
                     lineStatuses = uiState.lineStatuses,
+                    arrivalsUpdatedAt = uiState.nearbyArrivalsUpdatedAt,
                     onClose = {
                         selectedStation = null
                         viewModel.selectStation(null)
                     },
                     onViewDetails = { onStationClick(station.id) },
-                    onPlanRoute = { onStationClick(station.id) },
+                    onPlanRoute = { onNavigateToRoute(station.id) },
                 )
             }
         }
@@ -1004,10 +1131,22 @@ private fun StationInfoCard(
     isLoadingArrivals: Boolean,
     arrivalsError: Boolean,
     lineStatuses: List<LineStatus> = emptyList(),
+    arrivalsUpdatedAt: Long = 0L,
     onClose: () -> Unit,
     onViewDetails: () -> Unit,
     onPlanRoute: () -> Unit = {},
 ) {
+    val freshnessLabel = remember(arrivalsUpdatedAt) {
+        if (arrivalsUpdatedAt == 0L) null
+        else {
+            val ageSeconds = ((System.currentTimeMillis() - arrivalsUpdatedAt) / 1000).toInt()
+            when {
+                ageSeconds < 30 -> "Just now"
+                ageSeconds < 90 -> "${ageSeconds}s ago"
+                else -> "${ageSeconds / 60}m ago"
+            }
+        }
+    }
     val stationLines = remember(station.id) { TubeData.getLinesForStation(station.id) }
     val stationLineStatusMap = remember(lineStatuses, station.id) {
         lineStatuses.filter { ls -> station.lineIds.contains(ls.lineId) }.associateBy { it.lineId }
@@ -1140,12 +1279,16 @@ private fun StationInfoCard(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     } else if (arrivals != null) {
-                        Text(
-                            "Live",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = StatusGood,
-                            fontWeight = FontWeight.Bold,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(StatusGood))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                freshnessLabel?.let { "Live · $it" } ?: "Live",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = StatusGood,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
