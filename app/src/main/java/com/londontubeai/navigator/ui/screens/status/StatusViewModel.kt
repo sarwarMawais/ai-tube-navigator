@@ -3,6 +3,7 @@ package com.londontubeai.navigator.ui.screens.status
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.londontubeai.navigator.data.local.entity.CachedLineStatusEntity
+import com.londontubeai.navigator.data.model.AiInsight
 import com.londontubeai.navigator.data.model.LineDetail
 import com.londontubeai.navigator.data.model.LineStatus
 import com.londontubeai.navigator.data.model.TransportMode
@@ -121,6 +122,10 @@ data class StatusUiState(
     val isLiveConnection: Boolean = false,
     val isUsingCachedData: Boolean = false,
     val expandedCards: Set<String> = emptySet(),
+    // Predicted delay minutes per tube line id (from ML engine).
+    val delayPredictions: Map<String, Int> = emptyMap(),
+    // Contextual AI insights surfacing commute impact, peak hour tips, etc.
+    val aiInsights: List<AiInsight> = emptyList(),
 ) {
     val goodCount: Int get() = lineStatuses.count { it.isGoodService }
     val disruptedCount: Int get() = lineStatuses.size - goodCount
@@ -138,6 +143,8 @@ data class LineStatusUiModel(
     val disruptionSummary: String?,
     val estimatedResolution: String?,
     val lineBadgeLabel: String,
+    // ML-predicted delay in minutes (0 = no meaningful delay predicted).
+    val expectedDelayMinutes: Int = 0,
 )
 
 // ── ViewModel ───────────────────────────────────────────
@@ -163,6 +170,7 @@ class StatusViewModel @Inject constructor(
             query = debouncedQuery,
             favoriteLines = state.userProfile?.favoriteLines.orEmpty().toSet(),
             commuteLineIds = state.commuteLineIds,
+            delayPredictions = state.delayPredictions,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -184,6 +192,11 @@ class StatusViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             repository.fetchLiveLineStatuses()
                 .onSuccess { statuses ->
+                    val delays = runCatching {
+                        repository.predictAllDelays(statuses)
+                            .associate { it.lineId to it.expectedDelayMinutes }
+                    }.getOrDefault(emptyMap())
+                    val insights = runCatching { repository.generateInsights(statuses) }.getOrDefault(emptyList())
                     _uiState.value = _uiState.value.copy(
                         lineStatuses = statuses,
                         lineDetails = buildLineDetails(statuses),
@@ -191,12 +204,23 @@ class StatusViewModel @Inject constructor(
                         lastUpdated = formatTimestamp(),
                         isLiveConnection = true,
                         isUsingCachedData = false,
+                        delayPredictions = delays,
+                        aiInsights = insights,
                     )
                 }
                 .onFailure {
                     val cachedStatuses = repository.getCachedLineStatuses().first().map { it.toLineStatus() }
                     val cachedTimestamp = repository.getLastStatusUpdate()?.let { formatTimestamp(it) }
 
+                    val cachedDelays = if (cachedStatuses.isNotEmpty()) {
+                        runCatching {
+                            repository.predictAllDelays(cachedStatuses)
+                                .associate { it.lineId to it.expectedDelayMinutes }
+                        }.getOrDefault(emptyMap())
+                    } else _uiState.value.delayPredictions
+                    val cachedInsights = if (cachedStatuses.isNotEmpty()) {
+                        runCatching { repository.generateInsights(cachedStatuses) }.getOrDefault(emptyList())
+                    } else _uiState.value.aiInsights
                     _uiState.value = _uiState.value.copy(
                         lineStatuses = if (cachedStatuses.isNotEmpty()) cachedStatuses else _uiState.value.lineStatuses,
                         lineDetails = if (cachedStatuses.isNotEmpty()) buildLineDetails(cachedStatuses) else _uiState.value.lineDetails,
@@ -209,6 +233,8 @@ class StatusViewModel @Inject constructor(
                         lastUpdated = cachedTimestamp ?: _uiState.value.lastUpdated,
                         isLiveConnection = false,
                         isUsingCachedData = cachedStatuses.isNotEmpty(),
+                        delayPredictions = cachedDelays,
+                        aiInsights = cachedInsights,
                     )
                 }
         }
@@ -299,6 +325,7 @@ class StatusViewModel @Inject constructor(
         query: String,
         favoriteLines: Set<String>,
         commuteLineIds: Set<String>,
+        delayPredictions: Map<String, Int> = emptyMap(),
     ): List<LineStatusUiModel> {
         val searched = statuses.filter { status ->
             if (query.isBlank()) return@filter true
@@ -333,6 +360,7 @@ class StatusViewModel @Inject constructor(
                     disruptionSummary = disruptionSummary(status, detail, affectsCommute),
                     estimatedResolution = estimateResolution(status),
                     lineBadgeLabel = lineBadgeLabel(status.lineName),
+                    expectedDelayMinutes = delayPredictions[status.lineId] ?: 0,
                 )
             }
             .sortedWith(

@@ -50,6 +50,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Route
@@ -92,6 +93,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.londontubeai.navigator.data.model.AiInsight
 import com.londontubeai.navigator.data.model.LineDetail
 import com.londontubeai.navigator.data.model.LineStationStop
 import com.londontubeai.navigator.data.model.LineStatus
@@ -168,6 +170,22 @@ fun StatusScreen(viewModel: StatusViewModel = hiltViewModel()) {
                                 lastUpdated = uiState.lastUpdated,
                                 onRetry = { viewModel.loadStatuses() },
                             )
+                        }
+
+                        // Network health + AI insights — only shown on the ALL filter
+                        // so it does not distract from focused views (disrupted / favourites).
+                        if (uiState.filter == StatusFilter.ALL && uiState.totalCount > 0) {
+                            item(key = "network-health") {
+                                NetworkHealthInsightsCard(
+                                    healthPercent = uiState.healthPercent,
+                                    disruptedCount = uiState.disruptedCount,
+                                    totalCount = uiState.totalCount,
+                                    insights = uiState.aiInsights.take(3),
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                                        .animateItem(),
+                                )
+                            }
                         }
 
                         if (filteredStatuses.isEmpty()) {
@@ -424,6 +442,160 @@ private fun StatBadge(label: String, color: Color) {
 }
 
 // ════════════════════════════════════════════════════════════
+//  Network Health Ring + AI Insights Card
+// ════════════════════════════════════════════════════════════
+
+@Composable
+private fun NetworkHealthInsightsCard(
+    healthPercent: Int,
+    disruptedCount: Int,
+    totalCount: Int,
+    insights: List<AiInsight>,
+    modifier: Modifier = Modifier,
+) {
+    val ringColor = when {
+        healthPercent >= 80 -> StatusGood
+        healthPercent >= 60 -> StatusMinor
+        else -> StatusSevere
+    }
+    val animatedHealth by animateFloatAsState(
+        targetValue = healthPercent / 100f,
+        animationSpec = tween(durationMillis = 800),
+        label = "healthRing",
+    )
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+        ),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Circular health ring
+                Box(
+                    modifier = Modifier.size(64.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        progress = { 1f },
+                        modifier = Modifier.fillMaxSize(),
+                        color = ringColor.copy(alpha = 0.15f),
+                        strokeWidth = 6.dp,
+                        trackColor = Color.Transparent,
+                    )
+                    CircularProgressIndicator(
+                        progress = { animatedHealth },
+                        modifier = Modifier.fillMaxSize(),
+                        color = ringColor,
+                        strokeWidth = 6.dp,
+                        trackColor = Color.Transparent,
+                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "$healthPercent%",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = ringColor,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Network health",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        if (disruptedCount == 0) "All $totalCount lines in good service"
+                        else "$disruptedCount of $totalCount lines disrupted",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = ringColor.copy(alpha = 0.12f),
+                    ) {
+                        Text(
+                            when {
+                                healthPercent >= 90 -> "Running smoothly"
+                                healthPercent >= 70 -> "Mostly on time"
+                                healthPercent >= 50 -> "Some disruption"
+                                else -> "Significant disruption"
+                            },
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ringColor,
+                        )
+                    }
+                }
+            }
+
+            // AI insights list
+            if (insights.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                androidx.compose.material3.HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Filled.Lightbulb,
+                        null,
+                        tint = TubePrimary,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "AI insights",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = TubePrimary,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                insights.forEach { insight ->
+                    Row(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 5.dp)
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(TubePrimary),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                insight.title,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                insight.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════
 //  Search Bar
 // ════════════════════════════════════════════════════════════
 
@@ -622,6 +794,29 @@ private fun LineStatusCard(
                         }
                     } else {
                         StatusBadgePill(uiModel.statusBadge, statusColor)
+                    }
+                    // ML-predicted delay chip — only surface when meaningful (≥2 min)
+                    if (uiModel.expectedDelayMinutes >= 2) {
+                        Spacer(Modifier.height(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = StatusSevere.copy(alpha = 0.12f),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Filled.Warning, null, tint = StatusSevere, modifier = Modifier.size(11.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    "AI forecast: ~+${uiModel.expectedDelayMinutes}m",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = StatusSevere,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp,
+                                )
+                            }
+                        }
                     }
                 }
                 // Commute / favourite context

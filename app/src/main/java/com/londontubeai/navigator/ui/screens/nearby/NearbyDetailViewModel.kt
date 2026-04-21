@@ -10,9 +10,11 @@ import com.londontubeai.navigator.data.model.RouteSource
 import com.londontubeai.navigator.data.model.Station
 import com.londontubeai.navigator.data.model.StationArrivals
 import com.londontubeai.navigator.data.model.TransportMode
+import com.londontubeai.navigator.data.model.CrowdPrediction
 import com.londontubeai.navigator.data.model.TubeData
 import com.londontubeai.navigator.data.repository.TubeRepository
 import com.londontubeai.navigator.utils.LocationService
+import java.util.Calendar
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -49,6 +51,7 @@ data class NearbyStation(
     val station: Station,
     val distanceKm: Double,
     val walkingMinutes: Int,
+    val bearingDegrees: Float = 0f,
     val lineStatuses: List<LineStatus>,
     val busRoutes: List<BusRoute>,
     val arrivals: List<StationArrivalInfo>,
@@ -57,6 +60,7 @@ data class NearbyStation(
     val busSource: NearbyDataSource = NearbyDataSource.LIVE,
     val arrivalsUpdatedAt: Long? = null,
     val accessOption: NearbyAccessOption? = null,
+    val crowdPrediction: CrowdPrediction? = null,
     /**
      * True once bus routes and access options have been fetched for this station.
      * Lazily populated on card expand for stations outside the top enrichment tier.
@@ -82,6 +86,7 @@ data class StationArrivalInfo(
 
 data class NearbyDetailUiState(
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
     val nearbyStations: List<NearbyStation> = emptyList(),
     val error: String? = null,
     val userLatitude: Double = 0.0,
@@ -89,6 +94,8 @@ data class NearbyDetailUiState(
     val sortMode: NearbySortMode = NearbySortMode.NEAREST,
     val overviewUpdatedAt: Long? = null,
     val overviewSource: NearbyDataSource = NearbyDataSource.LIVE,
+    val radiusKm: Double = 2.0,
+    val stepFreeOnly: Boolean = false,
 )
 
 @HiltViewModel
@@ -97,8 +104,7 @@ class NearbyDetailViewModel @Inject constructor(
     private val locationService: LocationService,
 ) : ViewModel() {
 
-    private val nearbyRadiusKm = 4.8
-    private val maxNearbyStations = 12
+    private val maxNearbyStations = 20
     private val busStopRadiusMeters = 400
     /** Only the top-N nearest stations get the heavy bus+access enrichment up front. */
     private val enrichNearCount = 6
@@ -113,7 +119,24 @@ class NearbyDetailViewModel @Inject constructor(
     }
 
     fun refresh() {
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
         loadNearbyStations()
+    }
+
+    fun setRadiusKm(km: Double) {
+        if (_uiState.value.radiusKm == km) return
+        _uiState.value = _uiState.value.copy(radiusKm = km)
+        loadNearbyStations()
+    }
+
+    fun setStepFreeOnly(enabled: Boolean) {
+        if (_uiState.value.stepFreeOnly == enabled) return
+        _uiState.value = _uiState.value.copy(stepFreeOnly = enabled)
+        val filtered = _uiState.value.nearbyStations.let { stations ->
+            if (enabled) stations.filter { it.station.hasStepFreeAccess } else stations
+        }
+        _uiState.value = _uiState.value.copy(nearbyStations = sortStations(filtered, _uiState.value.sortMode))
+        if (enabled) loadNearbyStations()
     }
 
     /**
@@ -188,8 +211,13 @@ class NearbyDetailViewModel @Inject constructor(
                         userLongitude = location.longitude,
                     )
 
+                    val radiusKm = _uiState.value.radiusKm
+                    val stepFreeOnly = _uiState.value.stepFreeOnly
+                    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
                     val allStations = TubeData.getAllStationsSorted()
                     val nearestStations = allStations
+                        .asSequence()
+                        .filter { !stepFreeOnly || it.hasStepFreeAccess }
                         .map { station ->
                             val distance = locationService.calculateDistance(
                                 location.latitude, location.longitude,
@@ -198,26 +226,32 @@ class NearbyDetailViewModel @Inject constructor(
                             station to distance
                         }
                         .sortedBy { it.second }
-                        .filter { it.second <= nearbyRadiusKm }
+                        .filter { it.second <= radiusKm }
                         .take(maxNearbyStations)
+                        .toList()
 
                     val nearbyList = nearestStations.map { (station, distance) ->
                         val walkMinutes = estimateWalkingTime(distance)
+                        val bearing = computeBearing(location.latitude, location.longitude, station.latitude, station.longitude)
+                        val crowd = runCatching { repository.predictCrowding(station.id, hour) }.getOrNull()
                         NearbyStation(
                             station = station,
                             distanceKm = distance,
                             walkingMinutes = walkMinutes,
+                            bearingDegrees = bearing,
                             lineStatuses = allLineStatuses.filter { it.lineId in station.lineIds },
                             busRoutes = emptyList(),
                             arrivals = emptyList(),
                             isLoadingArrivals = true,
                             tubeSource = if (usedCachedStatuses) NearbyDataSource.CACHED else NearbyDataSource.LIVE,
+                            crowdPrediction = crowd,
                         )
                     }
 
                     _uiState.value = _uiState.value.copy(
                         nearbyStations = sortStations(nearbyList, _uiState.value.sortMode),
                         isLoading = false,
+                        isRefreshing = false,
                         overviewUpdatedAt = System.currentTimeMillis(),
                         overviewSource = if (usedCachedStatuses) NearbyDataSource.CACHED else NearbyDataSource.LIVE,
                     )
@@ -274,6 +308,7 @@ class NearbyDetailViewModel @Inject constructor(
                     if (generation != loadGeneration) return@onFailure
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
+                        isRefreshing = false,
                         error = "Could not get your location. Please check location permissions.",
                     )
                 }
@@ -333,6 +368,21 @@ class NearbyDetailViewModel @Inject constructor(
     private fun estimateWalkingTime(distanceKm: Double): Int {
         // 5 km/h average walking pace => 12 min per km.
         return (distanceKm * 12.0).roundToInt().coerceAtLeast(1)
+    }
+
+    /**
+     * Initial compass bearing in degrees from (lat1,lng1) toward (lat2,lng2).
+     * Returns 0° = North, clockwise. Used for directional arrows on station cards.
+     */
+    private fun computeBearing(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Float {
+        val φ1 = Math.toRadians(lat1)
+        val φ2 = Math.toRadians(lat2)
+        val Δλ = Math.toRadians(lng2 - lng1)
+        val y = kotlin.math.sin(Δλ) * kotlin.math.cos(φ2)
+        val x = kotlin.math.cos(φ1) * kotlin.math.sin(φ2) -
+            kotlin.math.sin(φ1) * kotlin.math.cos(φ2) * kotlin.math.cos(Δλ)
+        val θ = kotlin.math.atan2(y, x)
+        return ((Math.toDegrees(θ) + 360.0) % 360.0).toFloat()
     }
 
     private fun sortStations(

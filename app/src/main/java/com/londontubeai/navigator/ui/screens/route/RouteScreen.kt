@@ -233,7 +233,7 @@ fun RouteScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 24.dp),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
         ) {
             // ── Calculating ──────────────────────────────────────
             if (uiState.isCalculating) {
@@ -297,8 +297,10 @@ fun RouteScreen(
                                     } ?: "In London · Live data active",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = StatusGood,
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
-                                Spacer(modifier = Modifier.weight(1f))
                                 Surface(shape = RoundedCornerShape(6.dp), color = StatusGood.copy(alpha = 0.15f)) {
                                     Text("● Live", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = StatusGood)
                                 }
@@ -320,8 +322,11 @@ fun RouteScreen(
                                         ?: "Outside London · TfL routes searched from your location",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = StatusMinor,
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    lineHeight = 15.sp,
                                 )
-                                Spacer(modifier = Modifier.weight(1f))
                                 Surface(shape = RoundedCornerShape(6.dp), color = StatusMinor.copy(alpha = 0.15f)) {
                                     Text("General", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = StatusMinor)
                                 }
@@ -336,7 +341,14 @@ fun RouteScreen(
                             Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Public, null, tint = StatusMinor, modifier = Modifier.size(13.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Outside London · General route data shown", style = MaterialTheme.typography.labelSmall, color = StatusMinor)
+                                Text(
+                                    "Outside London · General route data shown",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = StatusMinor,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                         }
                     }
@@ -373,6 +385,7 @@ fun RouteScreen(
                             route = route,
                             isInsideLondon = uiState.isInsideLondon,
                             lineStatuses = uiState.lineStatuses,
+                            delayPredictions = uiState.delayPredictions,
                         )
                     }
                 }
@@ -1493,6 +1506,7 @@ private fun GoogleMapsTimelineCard(
     route: com.londontubeai.navigator.data.model.JourneyRoute,
     isInsideLondon: Boolean,
     lineStatuses: List<com.londontubeai.navigator.data.model.LineStatus> = emptyList(),
+    delayPredictions: Map<String, Int> = emptyMap(),
 ) {
     val routeKey = "${route.fromStation.id}-${route.toStation.id}-${route.totalDurationMinutes}-${route.legs.size}"
     var expanded by remember(routeKey) { mutableStateOf(true) }
@@ -1607,6 +1621,12 @@ private fun GoogleMapsTimelineCard(
                         val disruptionChip: String? = disruption?.let {
                             "⚠️ ${it.statusDescription}"
                         }
+                        // ML-predicted delay for this tube line. Only surface when
+                        // meaningful (≥2 min) to avoid noise on healthy lines.
+                        val predictedDelay: Int? = if (leg.mode == TransportMode.TUBE) {
+                            delayPredictions[leg.line.id]?.takeIf { it >= 2 }
+                        } else null
+                        val delayChip: String? = predictedDelay?.let { "🚨 ~+${it} min predicted" }
                         when (leg.mode) {
                             TransportMode.TUBE -> {
                                 TimelineSegment(
@@ -1615,6 +1635,7 @@ private fun GoogleMapsTimelineCard(
                                     subLabel = "${leg.intermediateStops} stops · ${leg.durationMinutes} min",
                                     extras = buildList {
                                         if (disruptionChip != null) add(disruptionChip)
+                                        if (delayChip != null) add(delayChip)
                                         addAll(liveExtras)
                                         if (leg.nextDepartureMinutes > 0 && minsUntilBoard == null) {
                                             add("Next: ${leg.nextDepartureMinutes} min")

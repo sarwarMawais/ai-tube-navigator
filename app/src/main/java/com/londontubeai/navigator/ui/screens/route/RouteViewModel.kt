@@ -107,6 +107,9 @@ data class RouteUiState(
     // Live TfL line statuses — used to surface per-leg disruption warnings
     // inside the step-by-step timeline. Empty = unknown / offline.
     val lineStatuses: List<LineStatus> = emptyList(),
+    // Predicted delay (in minutes) per tube line id — driven by the ML delay engine,
+    // rendered as a compact chip inside each leg card.
+    val delayPredictions: Map<String, Int> = emptyMap(),
     // Timestamp of last successful route plan — shown as "Updated Xm ago"
     // and used by the auto-refresh loop for LEAVE_NOW journeys.
     val lastPlannedEpochMs: Long = 0L,
@@ -164,7 +167,15 @@ class RouteViewModel @Inject constructor(
                         isGoodService = entity.statusSeverity >= 10,
                     )
                 }
-                _uiState.value = _uiState.value.copy(lineStatuses = mapped)
+                // Predict delay per line using the ML engine (pure function, cheap to call).
+                val delayMap = runCatching {
+                    repository.predictAllDelays(mapped)
+                        .associate { it.lineId to it.expectedDelayMinutes }
+                }.getOrDefault(emptyMap())
+                _uiState.value = _uiState.value.copy(
+                    lineStatuses = mapped,
+                    delayPredictions = delayMap,
+                )
             }
         }
     }

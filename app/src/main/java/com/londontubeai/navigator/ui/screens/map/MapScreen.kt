@@ -177,6 +177,8 @@ fun MapScreen(
     // Phase D filter overlays
     var showDisruptedOnly by remember { mutableStateOf(false) }
     var showStepFreeOnly by remember { mutableStateOf(false) }
+    // Null = all zones. "6" means zone 6 or higher (outer zones grouped).
+    var selectedZone by remember { mutableStateOf<String?>(null) }
     // Follow-mode: camera keeps re-centering on the user's live position.
     var followMode by remember { mutableStateOf(false) }
     // Traffic overlay + 3D tilt — controllable from the map-style picker FAB.
@@ -293,11 +295,16 @@ fun MapScreen(
     val searchResults = uiState.searchResults
     val recentPlaces = uiState.recentPlaces.take(6)
 
-    // Filter stations by selected line + optional step-free overlay.
-    val filteredStations = remember(selectedLineFilter, showStepFreeOnly) {
+    // Filter stations by selected line + optional step-free + zone overlays.
+    val filteredStations = remember(selectedLineFilter, showStepFreeOnly, selectedZone) {
         val base = if (selectedLineFilter == null) stations
         else stations.filter { it.lineIds.contains(selectedLineFilter) }
-        if (showStepFreeOnly) base.filter { it.hasStepFreeAccess } else base
+        val afterStepFree = if (showStepFreeOnly) base.filter { it.hasStepFreeAccess } else base
+        when (val z = selectedZone) {
+            null -> afterStepFree
+            "6" -> afterStepFree.filter { (it.zone.toIntOrNull() ?: 0) >= 6 }
+            else -> afterStepFree.filter { it.zone == z }
+        }
     }
 
     // Filter connections by selected line + optional "disrupted only" overlay.
@@ -1177,7 +1184,10 @@ fun MapScreen(
 
         AnimatedVisibility(
             visible = showLineFilters,
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = Spacing.xxxl),
+            // 104.dp matches the header offset used by the journey/nearest-station
+            // cards above so the filter row lines up flush beneath the search bar
+            // rather than overlapping it (old value Spacing.xxxl = 32.dp collided).
+            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 104.dp),
             enter = fadeIn() + slideInVertically(),
             exit = fadeOut() + slideOutVertically(),
         ) {
@@ -1222,6 +1232,19 @@ fun MapScreen(
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = StatusGood.copy(alpha = 0.15f),
                                 selectedLabelColor = StatusGood,
+                            ),
+                        )
+                    }
+                    // Zone filters — tap again to clear.
+                    items(listOf("1", "2", "3", "4", "5", "6")) { z ->
+                        val label = if (z == "6") "Z6+" else "Z$z"
+                        FilterChip(
+                            selected = selectedZone == z,
+                            onClick = { selectedZone = if (selectedZone == z) null else z },
+                            label = { Text(label) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f),
+                                selectedLabelColor = MaterialTheme.colorScheme.tertiary,
                             ),
                         )
                     }
@@ -1491,12 +1514,16 @@ fun MapScreen(
             }
         }
 
-        // Network Status Strip + station badge — stacked in a column to prevent overlap
+        // Network Status Strip + station badge — stacked in a column to prevent overlap.
+        // When an active journey is showing, lift the column by ~96dp so it sits ABOVE
+        // the route-progress card (which lives at BottomStart) and add end-padding so
+        // the station-count pill never collides with the FAB column at BottomEnd.
+        val bottomStartLift = if (uiState.journeyRoute != null) 96.dp else 12.dp
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .navigationBarsPadding()
-                .padding(start = 16.dp, bottom = 12.dp),
+                .padding(start = 16.dp, end = 96.dp, bottom = bottomStartLift),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             AnimatedVisibility(
@@ -1567,7 +1594,9 @@ fun MapScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
-                .padding(top = 80.dp, start = Spacing.screenHorizontal, end = Spacing.screenHorizontal),
+                // 160.dp places the banner under the search header + filters/cards
+                // row rather than colliding with them.
+                .padding(top = 160.dp, start = Spacing.screenHorizontal, end = Spacing.screenHorizontal),
             enter = fadeIn() + slideInVertically { -it },
             exit = fadeOut() + slideOutVertically { -it },
         ) {

@@ -50,8 +50,12 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SettingsPhone
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Work
@@ -106,6 +110,9 @@ import com.londontubeai.navigator.ui.theme.TubePrimary
 import com.londontubeai.navigator.ui.theme.TubeSecondary
 import com.londontubeai.navigator.ui.components.UnifiedHeader
 import kotlinx.coroutines.launch
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,6 +128,7 @@ fun SettingsScreen(
     val isPremium by viewModel.isPremium.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
 
     // Station picker state
     var showStationPicker by remember { mutableStateOf(false) }
@@ -510,7 +518,104 @@ fun SettingsScreen(
             }
 
             // ═══════════════════════════════════════════════════
-            // 7. PRIVACY & ABOUT
+            // 7. SUPPORT & COMMUNITY
+            // ═══════════════════════════════════════════════════
+            item { SectionTitle("Support & Community") }
+            item {
+                SettingsCard {
+                    SettingsNavItem(
+                        title = "Rate the App",
+                        description = "Love it? Leave a 5-star review on Google Play",
+                        icon = Icons.Filled.RateReview,
+                        iconColor = Color(0xFFFFB300),
+                        value = "",
+                        onClick = {
+                            val pkg = context.packageName
+                            val marketIntent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("market://details?id=$pkg"),
+                            ).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY or Intent.FLAG_ACTIVITY_MULTIPLE_TASK or Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+                            }
+                            runCatching { context.startActivity(marketIntent) }.onFailure {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(
+                                            Intent.ACTION_VIEW,
+                                            Uri.parse("https://play.google.com/store/apps/details?id=$pkg"),
+                                        ),
+                                    )
+                                }
+                            }
+                        },
+                    )
+                    SettingsDivider()
+                    SettingsNavItem(
+                        title = "Share the App",
+                        description = "Tell your friends about AI Tube Navigator",
+                        icon = Icons.Filled.Share,
+                        iconColor = TubePrimary,
+                        value = "",
+                        onClick = {
+                            val pkg = context.packageName
+                            val text = "Plan smarter London Tube journeys with AI Tube Navigator: " +
+                                "https://play.google.com/store/apps/details?id=$pkg"
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, "AI Tube Navigator")
+                                putExtra(Intent.EXTRA_TEXT, text)
+                            }
+                            runCatching { context.startActivity(Intent.createChooser(intent, "Share app")) }
+                        },
+                    )
+                    SettingsDivider()
+                    SettingsNavItem(
+                        title = "Send Feedback",
+                        description = "Ideas or general questions? Drop us a line",
+                        icon = Icons.Filled.Email,
+                        iconColor = TubeSecondary,
+                        value = "",
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                data = Uri.parse("mailto:feedback@aitubenavigator.app")
+                                putExtra(Intent.EXTRA_SUBJECT, "AI Tube Navigator feedback")
+                            }
+                            runCatching { context.startActivity(Intent.createChooser(intent, "Send feedback")) }
+                                .onFailure {
+                                    scope.launch { snackbarHostState.showSnackbar("No email app installed") }
+                                }
+                        },
+                    )
+                    SettingsDivider()
+                    SettingsNavItem(
+                        title = "Report a Bug",
+                        description = "Something not working? Let us know",
+                        icon = Icons.Filled.BugReport,
+                        iconColor = StatusSevere,
+                        value = "",
+                        onClick = {
+                            val body = buildString {
+                                append("\n\n——\n")
+                                append("Device: ").append(android.os.Build.MANUFACTURER).append(" ").append(android.os.Build.MODEL).append("\n")
+                                append("Android: ").append(android.os.Build.VERSION.RELEASE).append(" (SDK ").append(android.os.Build.VERSION.SDK_INT).append(")\n")
+                                append("App: ").append(context.packageName).append("\n")
+                            }
+                            val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                data = Uri.parse("mailto:bugs@aitubenavigator.app")
+                                putExtra(Intent.EXTRA_SUBJECT, "AI Tube Navigator bug report")
+                                putExtra(Intent.EXTRA_TEXT, body)
+                            }
+                            runCatching { context.startActivity(Intent.createChooser(intent, "Report a bug")) }
+                                .onFailure {
+                                    scope.launch { snackbarHostState.showSnackbar("No email app installed") }
+                                }
+                        },
+                    )
+                }
+            }
+
+            // ═══════════════════════════════════════════════════
+            // 8. PRIVACY & ABOUT
             // ═══════════════════════════════════════════════════
             item { SectionTitle("Privacy & About") }
             item {

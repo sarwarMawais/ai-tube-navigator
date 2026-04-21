@@ -138,6 +138,15 @@ class StationViewModel @Inject constructor(
         _listState.value = _listState.value.copy(searchMode = mode)
     }
 
+    fun clearAllFilters() {
+        _listState.value = _listState.value.copy(
+            filter = StationFilter.ALL,
+            selectedZone = null,
+            selectedLineId = null,
+            searchQuery = "",
+        )
+    }
+
     fun setFilter(filter: StationFilter) {
         _listState.value = _listState.value.copy(
             filter = filter,

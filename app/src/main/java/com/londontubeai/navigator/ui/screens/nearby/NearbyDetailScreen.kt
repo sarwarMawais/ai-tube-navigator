@@ -30,14 +30,18 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.AccessibleForward
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.DirectionsBus
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.NearMe
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Train
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -80,8 +84,13 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
+import android.net.Uri
+import com.londontubeai.navigator.data.model.CrowdLevel
 
 private val BusRed = Color(0xFFE32017)
 private val WalkGreen = Color(0xFF00A651)
@@ -122,7 +131,7 @@ fun NearbyDetailScreen(
             uiState.error != null -> ErrorState(uiState.error!!, onRetry = { viewModel.refresh() })
             uiState.nearbyStations.isEmpty() -> EmptyState()
             else -> androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-                isRefreshing = uiState.isLoading,
+                isRefreshing = uiState.isRefreshing,
                 onRefresh = { viewModel.refresh() },
                 modifier = Modifier.fillMaxSize(),
             ) {
@@ -147,6 +156,16 @@ fun NearbyDetailScreen(
                         )
                     }
 
+                    // Radius + step-free filter controls
+                    item {
+                        NearbyControlsRow(
+                            radiusKm = uiState.radiusKm,
+                            stepFreeOnly = uiState.stepFreeOnly,
+                            onRadiusChange = viewModel::setRadiusKm,
+                            onStepFreeToggle = viewModel::setStepFreeOnly,
+                        )
+                    }
+
                     // Journey mode legend
                     item {
                         JourneyModeLegend()
@@ -167,6 +186,87 @@ fun NearbyDetailScreen(
                             },
                             onExpand = { viewModel.onStationExpanded(nearbyStation.station.id) },
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NearbyControlsRow(
+    radiusKm: Double,
+    stepFreeOnly: Boolean,
+    onRadiusChange: (Double) -> Unit,
+    onStepFreeToggle: (Boolean) -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.NearMe, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    "Search radius",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (radiusKm >= 1.0) "${"%.1f".format(radiusKm)} km" else "${(radiusKm * 1000).toInt()} m",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val options = listOf(0.5 to "0.5", 1.0 to "1", 2.0 to "2", 5.0 to "5", 10.0 to "10")
+                items(options) { (km, label) ->
+                    val sel = radiusKm == km
+                    Surface(
+                        onClick = { onRadiusChange(km) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                    ) {
+                        Text(
+                            "${label} km",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (sel) FontWeight.ExtraBold else FontWeight.SemiBold,
+                            color = if (sel) Color.White else MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                item {
+                    val sel = stepFreeOnly
+                    Surface(
+                        onClick = { onStepFreeToggle(!stepFreeOnly) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (sel) StatusGood else StatusGood.copy(alpha = 0.1f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.AccessibleForward,
+                                null,
+                                tint = if (sel) Color.White else StatusGood,
+                                modifier = Modifier.size(12.dp),
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                "Step-free only",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (sel) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                color = if (sel) Color.White else StatusGood,
+                            )
+                        }
                     }
                 }
             }
@@ -441,7 +541,7 @@ private fun NearbyStationCard(
             Column(modifier = Modifier.padding(Spacing.lg)) {
                 // ── Header Row ──────────────────────────────────
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    // Index number badge
+                    // Index number badge with bearing arrow
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = distColor.copy(alpha = 0.12f),
@@ -450,13 +550,24 @@ private fun NearbyStationCard(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Text(
-                                text = if (nearbyStation.distanceKm < 1.0) "${(nearbyStation.distanceKm * 1000).toInt()}m"
-                                       else "${"%.1f".format(nearbyStation.distanceKm)}km",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = distColor,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Filled.Navigation,
+                                    null,
+                                    tint = distColor,
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .rotate(nearbyStation.bearingDegrees),
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = if (nearbyStation.distanceKm < 1.0) "${(nearbyStation.distanceKm * 1000).toInt()}m"
+                                           else "${"%.1f".format(nearbyStation.distanceKm)}km",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = distColor,
+                                )
+                            }
                             Text(
                                 text = "${nearbyStation.walkingMinutes} min",
                                 style = MaterialTheme.typography.labelSmall,
@@ -519,6 +630,17 @@ private fun NearbyStationCard(
                     }
 
                     Column(horizontalAlignment = Alignment.End) {
+                        val disruptedCount = nearbyStation.lineStatuses.count { !it.isGoodService }
+                        if (disruptedCount > 0) {
+                            Surface(shape = RoundedCornerShape(8.dp), color = StatusSevere.copy(alpha = 0.12f)) {
+                                Row(modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.Warning, null, tint = StatusSevere, modifier = Modifier.size(10.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("$disruptedCount issue${if (disruptedCount > 1) "s" else ""}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = StatusSevere, fontSize = 10.sp)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(3.dp))
+                        }
                         if (nearbyStation.arrivals.isNotEmpty()) {
                             Surface(shape = RoundedCornerShape(8.dp), color = TubeBlue.copy(alpha = 0.1f)) {
                                 Row(modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -572,6 +694,49 @@ private fun NearbyStationCard(
                             color = TubeBlue,
                             modifier = Modifier.weight(1f),
                         )
+                    }
+                }
+
+                // Crowd prediction chip
+                nearbyStation.crowdPrediction?.let { crowd ->
+                    val crowdColor = when (crowd.crowdLevel) {
+                        CrowdLevel.LOW -> StatusGood
+                        CrowdLevel.MODERATE -> StatusGood
+                        CrowdLevel.HIGH -> StatusMinor
+                        CrowdLevel.VERY_HIGH -> StatusSevere
+                        CrowdLevel.EXTREME -> StatusSevere
+                    }
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = crowdColor.copy(alpha = 0.08f),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Group, null, tint = crowdColor, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                crowd.crowdLevel.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = crowdColor,
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "· ${crowd.percentageFull}% full",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                "Now",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                fontSize = 9.sp,
+                            )
+                        }
                     }
                 }
 
@@ -680,6 +845,7 @@ private fun NearbyStationCard(
                             Spacer(modifier = Modifier.height(Spacing.md))
                         }
 
+                        val context = LocalContext.current
                         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                             Surface(
                                 modifier = Modifier.weight(1f),
@@ -712,6 +878,36 @@ private fun NearbyStationCard(
                                     Spacer(modifier = Modifier.width(Spacing.sm))
                                     Text("Full details", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
                                 }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            onClick = {
+                                val lat = station.latitude
+                                val lng = station.longitude
+                                val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${Uri.encode(station.name)})")
+                                val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                                    setPackage("com.google.android.apps.maps")
+                                }
+                                runCatching { context.startActivity(intent) }
+                                    .onFailure {
+                                        // Fallback: let the system choose any maps handler
+                                        val fallback = Intent(Intent.ACTION_VIEW, uri)
+                                        runCatching { context.startActivity(fallback) }
+                                    }
+                            },
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 11.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Filled.Map, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(Spacing.sm))
+                                Text("Open in Maps", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }

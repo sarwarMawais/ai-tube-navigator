@@ -39,6 +39,7 @@ import androidx.compose.material.icons.automirrored.filled.AccessibleForward
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsSubway
@@ -48,12 +49,14 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.HomeWork
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
@@ -122,6 +125,9 @@ import com.londontubeai.navigator.ui.theme.TubePrimary
 import com.londontubeai.navigator.ui.theme.TubeSecondary
 import com.londontubeai.navigator.ui.components.UnifiedHeader
 import com.londontubeai.navigator.ml.CrowdPredictionEngine
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 
 // ════════════════════════════════════════════════════════════
 //  Station List Screen
@@ -165,6 +171,58 @@ fun StationListScreen(
             onZoneSelect = { viewModel.selectZone(it) },
             onLineSelect = { viewModel.selectLine(it) },
         )
+
+        // ── Match count + Clear filters ──────────────────────
+        val filtersActive = listState.filter != StationFilter.ALL ||
+            listState.selectedZone != null ||
+            listState.selectedLineId != null ||
+            listState.searchQuery.isNotBlank()
+        if (filtersActive) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.screenHorizontal, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = TubePrimary.copy(alpha = 0.1f),
+                ) {
+                    Text(
+                        "${filteredStations.size} of ${listState.totalCount} stations",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TubePrimary,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Surface(
+                    onClick = { viewModel.clearAllFilters(); focusManager.clearFocus() },
+                    shape = RoundedCornerShape(8.dp),
+                    color = StatusSevere.copy(alpha = 0.08f),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            null,
+                            tint = StatusSevere,
+                            modifier = Modifier.size(12.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "Clear filters",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = StatusSevere,
+                        )
+                    }
+                }
+            }
+        }
 
         val statusMessage = listState.statusMessage
         if (statusMessage != null) {
@@ -753,14 +811,18 @@ fun StationDetailScreen(
     viewModel: StationViewModel = hiltViewModel(),
 ) {
     val state by viewModel.detailState.collectAsStateWithLifecycle()
+    val listState by viewModel.listState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     LaunchedEffect(stationId) { viewModel.loadStation(stationId) }
 
     val station = state.station
     val arrivals = state.arrivals
+    val isHome = station?.id != null && station.id == listState.homeStationId
+    val isWork = station?.id != null && station.id == listState.workStationId
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // ── Top bar with favourite ───────────────────────────
+        // ── Top bar with Share / Open-in-Maps / Home-Work / Favourite ──
         TopAppBar(
             title = { Text(station?.name ?: "Station", fontWeight = FontWeight.Bold) },
             navigationIcon = {
@@ -770,6 +832,63 @@ fun StationDetailScreen(
             },
             actions = {
                 if (station != null) {
+                    // Open in Maps — launches walking directions
+                    IconButton(onClick = {
+                        val uri = Uri.parse("geo:${station.latitude},${station.longitude}?q=${station.latitude},${station.longitude}(${Uri.encode(station.name)})")
+                        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                            setPackage("com.google.android.apps.maps")
+                        }
+                        runCatching { context.startActivity(intent) }.onFailure {
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                        }
+                    }) {
+                        Icon(
+                            Icons.Filled.Map,
+                            "Open in Maps",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // Share
+                    IconButton(onClick = {
+                        val shareText = buildString {
+                            append(station.name)
+                            append(" — Zone ").append(station.zone)
+                            append("\nLines: ").append(station.lineIds.mapNotNull { TubeData.getLineById(it)?.name }.joinToString(", "))
+                            append("\nhttps://www.google.com/maps/search/?api=1&query=${station.latitude},${station.longitude}")
+                        }
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, station.name)
+                            putExtra(Intent.EXTRA_TEXT, shareText)
+                        }
+                        runCatching { context.startActivity(Intent.createChooser(intent, "Share station")) }
+                    }) {
+                        Icon(
+                            Icons.Filled.Share,
+                            "Share",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // Set/unset Home
+                    IconButton(onClick = {
+                        viewModel.setHomeStation(if (isHome) null else station.id)
+                    }) {
+                        Icon(
+                            Icons.Filled.Home,
+                            "Set as Home",
+                            tint = if (isHome) StatusGood else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // Set/unset Work
+                    IconButton(onClick = {
+                        viewModel.setWorkStation(if (isWork) null else station.id)
+                    }) {
+                        Icon(
+                            Icons.Filled.Work,
+                            "Set as Work",
+                            tint = if (isWork) TubePrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     IconButton(onClick = { viewModel.toggleFavouriteStation(station.id) }) {
                         Icon(
                             if (state.isFavourite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -799,8 +918,14 @@ fun StationDetailScreen(
                 item { InsightsStrip(state.stationInsights) }
             }
 
-            // ── 4. Quick Stats ───────────────────────────────
+            // ── 4. Quick Stats ───────────────────────────────────
             item { StationSnapshotCard(station = station) }
+
+            // ── 4b. First / Last Train card per line ──────────────
+            if (state.linesAtStation.isNotEmpty()) {
+                item { DetailSectionTitle("First · Last Train", Icons.Filled.AccessTime) }
+                item { FirstLastTrainCard(lines = state.linesAtStation) }
+            }
 
             // ── 5. Line Status at this Station ───────────────
             if (state.lineStatuses.isNotEmpty()) {
@@ -821,7 +946,7 @@ fun StationDetailScreen(
                         arrivals = arrivals,
                         isLoading = state.isLoadingArrivals,
                         onRefresh = { viewModel.refreshArrivals() },
-                        modifier = Modifier.padding(horizontal = Spacing.screenHorizontal, vertical = Spacing.sm),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = Spacing.sm),
                     )
                 }
             } else if (state.isLoadingArrivals || state.arrivalError != null) {
@@ -1046,6 +1171,75 @@ private fun DetailHeaderCard(station: Station) {
                     }
                 }
             }
+        }
+    }
+}
+
+// ── First / Last Train Card ──────────────────────────────────
+
+@Composable
+private fun FirstLastTrainCard(lines: List<com.londontubeai.navigator.data.model.TubeLine>) {
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            lines.forEachIndexed { idx, line ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(line.color),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        line.name,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = line.color.copy(alpha = 0.1f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Filled.AccessTime,
+                                null,
+                                tint = line.color,
+                                modifier = Modifier.size(12.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "${line.firstTrain} \u2013 ${line.lastTrain}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = line.color,
+                            )
+                        }
+                    }
+                }
+                if (idx < lines.lastIndex) {
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Service hours shown are typical weekday. Night Tube and weekend schedules may differ.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                fontSize = 10.sp,
+            )
         }
     }
 }
