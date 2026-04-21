@@ -166,6 +166,12 @@ enum class TransportMode {
     TUBE, WALKING, BUS
 }
 
+enum class RouteSource {
+    TFL_API,
+    CACHE,
+    LOCAL_DIJKSTRA,
+}
+
 data class JourneyRoute(
     val fromStation: Station,
     val toStation: Station,
@@ -182,6 +188,11 @@ data class JourneyRoute(
     val estimatedFarePounds: Double? = null,
     val peakFarePounds: Double? = null,
     val isStepFreeRoute: Boolean = false,
+    val source: RouteSource = RouteSource.TFL_API,
+    // Exact scheduled times from the journey planner, in epoch millis.
+    // 0L = unknown (fallback to now + duration in UI).
+    val scheduledDepartureEpochMs: Long = 0L,
+    val scheduledArrivalEpochMs: Long = 0L,
 )
 
 data class JourneyLeg(
@@ -201,6 +212,13 @@ data class JourneyLeg(
     val nextDepartureMinutes: Int = 0,
     val platformNumber: String = "",
     val polylinePoints: List<Pair<Double, Double>> = emptyList(),
+    // Exact scheduled leg times (epoch millis). 0L = unknown.
+    // Used to render precise board/alight clock times and live countdowns.
+    val scheduledDepartureEpochMs: Long = 0L,
+    val scheduledArrivalEpochMs: Long = 0L,
+    // NapTan / ATCO code for this leg's board stop (buses), used to fetch
+    // live per-stop countdowns in the Route screen.
+    val boardStopNaptanId: String = "",
 )
 
 data class AiInsight(

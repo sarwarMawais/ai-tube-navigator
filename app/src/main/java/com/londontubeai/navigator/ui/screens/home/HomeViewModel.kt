@@ -7,6 +7,7 @@ import com.londontubeai.navigator.BuildConfig
 import com.londontubeai.navigator.data.local.entity.CachedLineStatusEntity
 import com.londontubeai.navigator.data.local.entity.SavedJourneyEntity
 import com.londontubeai.navigator.data.model.AiInsight
+import com.londontubeai.navigator.data.model.InsightType
 import com.londontubeai.navigator.data.model.JourneyRoute
 import com.londontubeai.navigator.data.model.LineStatus
 import com.londontubeai.navigator.data.model.TransportMode
@@ -18,6 +19,9 @@ import com.londontubeai.navigator.data.repository.TubeRepository
 import com.londontubeai.navigator.ml.PersonalCommuteAI
 import com.londontubeai.navigator.utils.PermissionsState
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -39,8 +43,16 @@ data class HomeUiState(
     val serviceQualityScore: Float = 0f,
     val weatherInfo: WeatherInfo? = null,
     val commuteTimeEstimate: String? = null,
+    /** 0–99 health score for the live commute: 100 = on-time + quiet, 0 = severe. `null` when unknown. */
+    val commuteHealthScore: Int? = null,
+    /** Extra delay in minutes vs. baseline commute time. Drives the health score and UI chip. */
+    val commuteExtraDelayMinutes: Int? = null,
+    val homeStationId: String? = null,
     val homeStationName: String? = null,
+    val workStationId: String? = null,
     val workStationName: String? = null,
+    val commuteDestinationId: String? = null,
+    val commuteDestinationName: String? = null,
     val nearbyStationArrivals: List<NearbyArrival> = emptyList(),
     val nearbyStatusMessage: String = "Location permission required",
     val isNearbyUsingFallback: Boolean = false,
@@ -139,6 +151,11 @@ data class VisitorLandmarkGuide(
     val tip: String,
 )
 
+data class RankedInsight(
+    val score: Int,
+    val insight: AiInsight,
+)
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val repository: TubeRepository,
@@ -150,6 +167,7 @@ class HomeViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+    private var nearbyArrivalsJob: Job? = null
 
     val recentJourneys: StateFlow<List<SavedJourneyEntity>> =
         repository.getRecentJourneys(5)
@@ -264,9 +282,14 @@ class HomeViewModel @Inject constructor(
             val workId = prefs.workStationId.first()
             val homeName = homeId?.let { TubeData.getStationById(it)?.name }
             val workName = workId?.let { TubeData.getStationById(it)?.name }
+            val (commuteDestinationId, commuteDestinationName) = resolveCommuteDestination(homeId, workId)
             _uiState.value = _uiState.value.copy(
+                homeStationId = homeId,
                 homeStationName = homeName,
+                workStationId = workId,
                 workStationName = workName,
+                commuteDestinationId = commuteDestinationId,
+                commuteDestinationName = commuteDestinationName,
             )
             if (homeId != null && workId != null) {
                 val route = repository.findRoute(homeId, workId)
@@ -363,11 +386,240 @@ class HomeViewModel @Inject constructor(
             val workId = prefs.workStationId.first()
             val statuses = _uiState.value.lineStatuses
             val snapshot = _uiState.value.commuterSnapshot
+            val (commuteDestinationId, commuteDestinationName) = resolveCommuteDestination(homeId, workId)
             _uiState.value = _uiState.value.copy(
+                commuteDestinationId = commuteDestinationId,
+                commuteDestinationName = commuteDestinationName,
                 leaveNowAssistant = buildLeaveNowAssistant(homeId, workId, snapshot, statuses),
                 fallbackRoutes = buildFallbackRoutes(homeId, workId, snapshot, statuses),
             )
+            refreshInsights()
         }
+    }
+
+    private fun refreshInsights() {
+        val statuses = _uiState.value.lineStatuses
+        if (statuses.isEmpty()) {
+            _uiState.value = _uiState.value.copy(aiInsights = emptyList())
+            return
+        }
+        _uiState.value = _uiState.value.copy(aiInsights = buildRankedInsights(statuses))
+    }
+
+    private fun buildRankedInsights(statuses: List<LineStatus>): List<AiInsight> {
+        val state = _uiState.value
+        val now = System.currentTimeMillis()
+        val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val recent = recentJourneys.value.take(4)
+        val relevantLineIds = mutableSetOf<String>().apply {
+            addAll(state.commuterSnapshot?.favoriteLineIds.orEmpty())
+            addAll(lineIdsForStation(state.homeStationId))
+            addAll(lineIdsForStation(state.workStationId))
+            recent.forEach { journey ->
+                addAll(lineIdsForStation(journey.fromStationId))
+                addAll(lineIdsForStation(journey.toStationId))
+            }
+        }
+        val relevantLineNames = relevantLineIds
+            .mapNotNull { lineId -> TubeData.getLineById(lineId)?.name }
+            .toSet()
+        val relevantStationNames = mutableSetOf<String>().apply {
+            state.homeStationName?.let(::add)
+            state.workStationName?.let(::add)
+            addAll(state.nearbyStationArrivals.map { it.stationName })
+            recent.flatMapTo(this) { listOf(it.fromStationName, it.toStationName) }
+        }
+        val baseInsights = repository.generateInsights(statuses)
+        val rankedInsights = mutableListOf<RankedInsight>()
+
+        if (state.commuteDestinationId != null && state.commuteDestinationName != null && state.leaveNowAssistant != null) {
+            val commuteIsLive = state.leaveNowAssistant.status != LeaveNowStatus.WAIT
+            rankedInsights += RankedInsight(
+                score = 2_000,
+                insight = AiInsight(
+                    title = state.leaveNowAssistant.title,
+                    description = state.leaveNowAssistant.message,
+                    type = InsightType.PERSONAL_ROUTE,
+                    actionLabel = "Open commute",
+                    priority = 12,
+                    confidence = 0.95f,
+                    isPersonalized = true,
+                    isLive = commuteIsLive,
+                    expiresAt = now + 45 * 60_000L,
+                    metadata = mapOf(
+                        "freshnessLabel" to if (commuteIsLive) "Live commute window" else "Based on your routine",
+                    ),
+                    userImpact = when (state.leaveNowAssistant.status) {
+                        LeaveNowStatus.LATE -> com.londontubeai.navigator.data.model.UserImpact.CRITICAL
+                        LeaveNowStatus.NOW, LeaveNowStatus.SOON -> com.londontubeai.navigator.data.model.UserImpact.HIGH
+                        LeaveNowStatus.WAIT -> com.londontubeai.navigator.data.model.UserImpact.MEDIUM
+                    },
+                ),
+            )
+        }
+
+        state.nearbyStationArrivals.firstOrNull()?.let { nearby ->
+            rankedInsights += RankedInsight(
+                score = 1_250,
+                insight = AiInsight(
+                    title = "Near you: ${nearby.stationName}",
+                    description = "${nearby.lineName} to ${nearby.destination} is ${if (nearby.minutesUntil <= 0) "due now" else "${nearby.minutesUntil} min away"} from your current area.",
+                    type = InsightType.STATION_HABIT,
+                    actionLabel = "See nearby",
+                    priority = 9,
+                    confidence = 0.87f,
+                    isPersonalized = true,
+                    isLive = !state.isNearbyUsingFallback,
+                    expiresAt = now + 12 * 60_000L,
+                    metadata = mapOf(
+                        "freshnessLabel" to if (state.isNearbyUsingFallback) "Cached nearby" else "Live nearby",
+                    ),
+                    userImpact = com.londontubeai.navigator.data.model.UserImpact.MEDIUM,
+                ),
+            )
+        }
+
+        baseInsights.forEach { insight ->
+            val matchesRelevantLines = relevantLineNames.any { lineName ->
+                insight.title.contains(lineName, ignoreCase = true) ||
+                    insight.description.contains(lineName, ignoreCase = true)
+            }
+            val matchesRelevantStations = relevantStationNames.any { stationName ->
+                insight.title.contains(stationName, ignoreCase = true) ||
+                    insight.description.contains(stationName, ignoreCase = true)
+            }
+            var score = (insight.priority * 100) + (insight.confidence * 100).toInt()
+            var isPersonalized = insight.isPersonalized
+            var impact = insight.userImpact
+            if (matchesRelevantLines) {
+                score += 220
+                isPersonalized = true
+                impact = maxImpact(
+                    impact,
+                    if (insight.type == InsightType.DELAY_WARNING || insight.type == InsightType.DISRUPTION_IMPACT) {
+                        com.londontubeai.navigator.data.model.UserImpact.CRITICAL
+                    } else {
+                        com.londontubeai.navigator.data.model.UserImpact.HIGH
+                    },
+                )
+            }
+            if (matchesRelevantStations) {
+                score += 140
+                isPersonalized = true
+                impact = maxImpact(impact, com.londontubeai.navigator.data.model.UserImpact.HIGH)
+            }
+            if (state.commuteDestinationName != null && insight.type in setOf(
+                    InsightType.TIME_SAVING,
+                    InsightType.TIME_PREFERENCE,
+                    InsightType.SAVINGS_OPPORTUNITY,
+                )
+            ) {
+                score += 120
+                isPersonalized = true
+                impact = maxImpact(impact, com.londontubeai.navigator.data.model.UserImpact.MEDIUM)
+            }
+            if (currentHour in 7..9 || currentHour in 17..19) {
+                if (insight.type == InsightType.CROWD_ALERT) {
+                    score += 180
+                }
+                if (insight.type == InsightType.DELAY_WARNING) {
+                    score += 80
+                }
+            }
+            val expiresAt = insight.expiresAt ?: when (insight.type) {
+                InsightType.DELAY_WARNING,
+                InsightType.DISRUPTION_IMPACT,
+                -> now + 15 * 60_000L
+                InsightType.CROWD_ALERT -> now + 25 * 60_000L
+                InsightType.TIME_SAVING,
+                InsightType.TIME_PREFERENCE,
+                InsightType.SAVINGS_OPPORTUNITY,
+                -> now + 60 * 60_000L
+                else -> null
+            }
+            val isLive = insight.isLive || insight.type in setOf(
+                InsightType.DELAY_WARNING,
+                InsightType.DISRUPTION_IMPACT,
+                InsightType.CROWD_ALERT,
+            )
+            val freshnessLabel = when {
+                isLive && expiresAt != null -> {
+                    val minutesLeft = ((expiresAt - now) / 60_000L).coerceAtLeast(1L)
+                    "Live · ${minutesLeft}m window"
+                }
+                expiresAt != null -> {
+                    val minutesLeft = ((expiresAt - now) / 60_000L).coerceAtLeast(1L)
+                    "Time-sensitive · ${minutesLeft}m left"
+                }
+                else -> "Fresh today"
+            }
+            rankedInsights += RankedInsight(
+                score = score,
+                insight = insight.copy(
+                    isPersonalized = isPersonalized,
+                    isLive = isLive,
+                    expiresAt = expiresAt,
+                    metadata = insight.metadata + mapOf("freshnessLabel" to freshnessLabel),
+                    userImpact = impact,
+                ),
+            )
+        }
+
+        return rankedInsights
+            .distinctBy { "${it.insight.title}|${it.insight.type}" }
+            .sortedByDescending { it.score }
+            .map { it.insight }
+    }
+
+    private fun lineIdsForStation(stationId: String?): Set<String> {
+        return stationId
+            ?.takeUnless { it.startsWith("my-location") || it.startsWith("place:") }
+            ?.let { TubeData.getStationById(it)?.lineIds?.toSet() }
+            .orEmpty()
+    }
+
+    private fun maxImpact(
+        current: com.londontubeai.navigator.data.model.UserImpact,
+        candidate: com.londontubeai.navigator.data.model.UserImpact,
+    ): com.londontubeai.navigator.data.model.UserImpact {
+        val order = listOf(
+            com.londontubeai.navigator.data.model.UserImpact.LOW,
+            com.londontubeai.navigator.data.model.UserImpact.MEDIUM,
+            com.londontubeai.navigator.data.model.UserImpact.HIGH,
+            com.londontubeai.navigator.data.model.UserImpact.CRITICAL,
+        )
+        return if (order.indexOf(candidate) > order.indexOf(current)) candidate else current
+    }
+
+    private fun resolveCommuteDestination(homeId: String?, workId: String?): Pair<String?, String?> {
+        if (homeId == null || workId == null) return null to null
+        val cal = java.util.Calendar.getInstance()
+        val dayOfWeek = cal.get(java.util.Calendar.DAY_OF_WEEK)
+        val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        val isWeekend = dayOfWeek == java.util.Calendar.SATURDAY || dayOfWeek == java.util.Calendar.SUNDAY
+
+        // Prefer the direction implied by the user's most recent journey, if it matches the
+        // home/work pair — this handles shift-workers and non-9-to-5 routines.
+        val recentDirection = recentJourneys.value.firstOrNull { journey ->
+            (journey.fromStationId == homeId && journey.toStationId == workId) ||
+                (journey.fromStationId == workId && journey.toStationId == homeId)
+        }
+        val recentWasHomeToWork = recentDirection?.let { it.fromStationId == homeId && it.toStationId == workId }
+
+        // Weekends: default to home (people rarely commute to work).
+        // Weekdays: morning window (04:00-14:00) = to work, else back home.
+        // If last known journey direction disagrees with the time-of-day guess AND was within
+        // the last 12h, trust the recent journey's opposite (user returning).
+        val defaultsTowardsWork = !isWeekend && hour in 4..13
+        val recentAge = recentDirection?.let { System.currentTimeMillis() - it.timestamp }
+        val destinationId = when {
+            recentWasHomeToWork == true && recentAge != null && recentAge < 12 * 3_600_000L -> homeId
+            recentWasHomeToWork == false && recentAge != null && recentAge < 12 * 3_600_000L -> workId
+            defaultsTowardsWork -> workId
+            else -> homeId
+        }
+        val destinationName = TubeData.getStationById(destinationId)?.name
+        return destinationId to destinationName
     }
 
     private fun buildLeaveNowAssistant(
@@ -520,12 +772,13 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun loadNearbyArrivals() {
+        nearbyArrivalsJob?.cancel()
         _uiState.value = _uiState.value.copy(
             isNearbyLoading = true,
             nearbyStatusMessage = "Finding nearby stations...",
             isOutsideLondon = false,
         )
-        viewModelScope.launch {
+        nearbyArrivalsJob = viewModelScope.launch {
             locationService.getCurrentLocation()
                 .onSuccess { location ->
                     // Check if user is within London
@@ -566,40 +819,45 @@ class HomeViewModel @Inject constructor(
                         return@launch
                     }
 
-                    // Fetch real arrivals from TfL API for nearest stations
-                    val arrivals = mutableListOf<NearbyArrival>()
-                    nearestStations.forEach { (station, distance) ->
-                        repository.fetchStationArrivals(station.id)
-                            .onSuccess { stationArrivals ->
-                                stationArrivals.arrivals
-                                    .filter { arrival ->
-                                        arrival.lineId in station.lineIds && arrival.timeToStationMinutes >= 0
+                    val stationResults = nearestStations
+                        .map { (station, distance) ->
+                            async {
+                                repository.fetchStationArrivals(station.id)
+                                    .getOrElse { error ->
+                                        Log.e("NearbyArrivals", "Failed for ${station.name}: ${error.message}")
+                                        null
                                     }
-                                    .groupBy { arrival -> arrival.lineId }
-                                    .values
-                                    .mapNotNull { lineArrivals ->
-                                        lineArrivals.minByOrNull { arrival -> arrival.timeToStationSeconds }
-                                    }
-                                    .sortedBy { arrival -> arrival.timeToStationMinutes }
-                                    .take(3)
-                                    .forEach { arrival ->
-                                    arrivals.add(
-                                        NearbyArrival(
-                                            stationName = station.name,
-                                            lineName = arrival.lineName,
-                                            destination = arrival.destination,
-                                            minutesUntil = arrival.timeToStationMinutes,
-                                            platform = arrival.platform,
-                                            distanceKm = distance,
-                                            lineColor = arrival.lineColor,
-                                        )
-                                    )
-                                    }
+                                    ?.let { stationArrivals -> Triple(station, distance, stationArrivals) }
                             }
-                            .onFailure { error ->
-                                Log.e("NearbyArrivals", "Failed for ${station.name}: ${error.message}")
+                        }
+                        .awaitAll()
+                        .filterNotNull()
+
+                    val arrivals = stationResults.flatMap { (station, distance, stationArrivals) ->
+                        stationArrivals.arrivals
+                            .filter { arrival ->
+                                arrival.lineId in station.lineIds && arrival.timeToStationMinutes >= 0
+                            }
+                            .groupBy { arrival -> arrival.lineId }
+                            .values
+                            .mapNotNull { lineArrivals ->
+                                lineArrivals.minByOrNull { arrival -> arrival.timeToStationSeconds }
+                            }
+                            .sortedBy { arrival -> arrival.timeToStationMinutes }
+                            .take(3)
+                            .map { arrival ->
+                                NearbyArrival(
+                                    stationName = station.name,
+                                    lineName = arrival.lineName,
+                                    destination = arrival.destination,
+                                    minutesUntil = arrival.timeToStationMinutes,
+                                    platform = arrival.platform,
+                                    distanceKm = distance,
+                                    lineColor = arrival.lineColor,
+                                )
                             }
                     }
+                    val isUsingFallback = stationResults.any { (_, _, stationArrivals) -> stationArrivals.isCached }
 
                     // Sort by arrival time, take top results
                     val sortedArrivals = arrivals
@@ -612,13 +870,16 @@ class HomeViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(
                         nearbyStationArrivals = sortedArrivals,
                         isNearbyLoading = false,
-                        nearbyStatusMessage = if (sortedArrivals.isNotEmpty())
-                            "Live arrivals near you"
-                        else
-                            "No live arrivals available right now",
-                        isNearbyUsingFallback = false,
+                        nearbyStatusMessage = when {
+                            sortedArrivals.isNotEmpty() && isUsingFallback -> "Cached arrivals near you"
+                            sortedArrivals.isNotEmpty() -> "Live arrivals near you"
+                            isUsingFallback -> "No cached arrivals available right now"
+                            else -> "No live arrivals available right now"
+                        },
+                        isNearbyUsingFallback = isUsingFallback,
                         isOutsideLondon = false,
                     )
+                    refreshInsights()
                 }
                 .onFailure { error ->
                     Log.e("NearbyArrivals", "Location failed: ${error.message}")
@@ -628,12 +889,42 @@ class HomeViewModel @Inject constructor(
                         nearbyStatusMessage = "Unable to get your location",
                         isNearbyUsingFallback = false,
                     )
+                    refreshInsights()
                 }
         }
     }
 
     fun retryNearbyArrivals() {
         loadNearbyArrivals()
+    }
+
+    fun refreshHomeData() {
+        loadLineStatuses()
+        loadNearbyArrivals()
+        loadWeatherInfo()
+    }
+
+    // ── Silent auto-refresh loop ───────────────────────────────────────────────
+    private var screenActive = false
+    private var autoRefreshJob: Job? = null
+
+    fun setScreenActive(active: Boolean) {
+        if (screenActive == active) return
+        screenActive = active
+        if (active) startAutoRefreshLoop() else autoRefreshJob?.cancel()
+    }
+
+    private fun startAutoRefreshLoop() {
+        autoRefreshJob?.cancel()
+        autoRefreshJob = viewModelScope.launch {
+            while (screenActive) {
+                kotlinx.coroutines.delay(60_000L) // refresh every 60 s
+                if (!screenActive) break
+                // Silent: no loading spinners, just swap data when responses return.
+                loadLineStatuses()
+                loadNearbyArrivals()
+            }
+        }
     }
 
     private fun loadNetworkStats() {
@@ -651,22 +942,22 @@ class HomeViewModel @Inject constructor(
 
             repository.fetchLiveLineStatuses()
                 .onSuccess { statuses ->
+                    val lastStatusUpdate = repository.getLastStatusUpdate()
                     _uiState.value = _uiState.value.copy(
                         lineStatuses = statuses,
                         isLoadingStatus = false,
-                        lastUpdated = "Just now",
-                        aiInsights = repository.generateInsights(statuses),
+                        lastUpdated = formatStatusUpdatedLabel(lastStatusUpdate, isCached = false),
                     )
                     computeDerivedStats(statuses)
                 }
                 .onFailure {
                     val cached = loadCachedStatuses()
+                    val lastStatusUpdate = repository.getLastStatusUpdate()
                     _uiState.value = _uiState.value.copy(
                         lineStatuses = cached,
                         isLoadingStatus = false,
                         statusError = if (cached.isEmpty()) "Unable to fetch line status. Check your connection." else null,
-                        lastUpdated = if (cached.isNotEmpty()) "Cached" else null,
-                        aiInsights = repository.generateInsights(cached),
+                        lastUpdated = if (cached.isNotEmpty()) formatStatusUpdatedLabel(lastStatusUpdate, isCached = true) else null,
                     )
                     computeDerivedStats(cached)
                 }
@@ -674,7 +965,16 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun computeDerivedStats(statuses: List<LineStatus>) {
-        if (statuses.isEmpty()) return
+        if (statuses.isEmpty()) {
+            _uiState.value = _uiState.value.copy(
+                serviceQualityScore = 0f,
+                minorDelayCount = 0,
+                severeDisruptionCount = 0,
+                aiInsights = emptyList(),
+            )
+            refreshPersonalizedHomeFeatures()
+            return
+        }
         val good = statuses.count { it.isGoodService }
         // TfL severity: 10 = Good, 6-9 = Minor, 0-5 = Severe/Suspended
         val minor = statuses.count { !it.isGoodService && it.statusSeverity in 6..9 }
@@ -707,20 +1007,53 @@ class HomeViewModel @Inject constructor(
             if (homeId != null && workId != null) {
                 val route = repository.findRoute(homeId, workId)
                 if (route != null) {
-                    val disruptedLines = statuses.count { !it.isGoodService }
-                    val delay = disruptedLines * 2
+                    // Only count disruptions on lines actually used by the commute route.
+                    val routeLineIds = route.legs
+                        .filter { it.mode == TransportMode.TUBE }
+                        .map { it.line.id }
+                        .toSet()
+                    val routeDisruptedSeverities = statuses
+                        .filter { !it.isGoodService && it.lineId in routeLineIds }
+                        .map { it.statusSeverity }
+                    val delay: Int = routeDisruptedSeverities.sumOf { severity ->
+                        when {
+                            severity < 4 -> 8 // Severe / Part Suspended
+                            severity < 7 -> 4 // Minor Delays
+                            else -> 2         // Reduced Service
+                        } as Int
+                    }
+                    // Phase D: derive a 0–100 commute-health score factoring in disruption delay
+                    // AND current crowd level so the user can see at a glance whether now is a
+                    // good time to travel.
+                    val crowdPenalty = (_uiState.value.crowdLevel.percentage * 25f).toInt()
+                    val delayPenalty = (delay * 3).coerceAtMost(60)
+                    val score = (100 - delayPenalty - crowdPenalty).coerceIn(0, 100)
                     _uiState.value = _uiState.value.copy(
-                        commuteTimeEstimate = "${route.totalDurationMinutes + delay} min"
+                        commuteTimeEstimate = "${route.totalDurationMinutes + delay} min",
+                        commuteHealthScore = score,
+                        commuteExtraDelayMinutes = delay,
                     )
                     return@launch
                 }
             }
-            // Fallback if no home/work set
-            val disruptedLines = statuses.count { !it.isGoodService }
+            // Fallback if no home/work set: show network-wide qualitative estimate.
+            val severeCount = statuses.count { !it.isGoodService && it.statusSeverity < 6 }
             val baseTime = 25
             _uiState.value = _uiState.value.copy(
-                commuteTimeEstimate = "${baseTime + disruptedLines * 3} min"
+                commuteTimeEstimate = "${baseTime + severeCount * 3} min"
             )
+        }
+    }
+
+    private fun formatStatusUpdatedLabel(lastUpdatedMillis: Long?, isCached: Boolean): String {
+        val prefix = if (isCached) "Cached" else "Updated"
+        if (lastUpdatedMillis == null) return if (isCached) "Cached" else "Just now"
+        val ageMinutes = ((System.currentTimeMillis() - lastUpdatedMillis) / 60_000L).coerceAtLeast(0L)
+        return when {
+            !isCached && ageMinutes == 0L -> "Just now"
+            ageMinutes == 0L -> "$prefix just now"
+            ageMinutes < 60L -> "$prefix ${ageMinutes}m ago"
+            else -> "$prefix ${ageMinutes / 60L}h ago"
         }
     }
 

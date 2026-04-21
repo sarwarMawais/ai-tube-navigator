@@ -66,6 +66,13 @@ android {
     }
 }
 
+// Workaround for intermittent AGP/Gradle snapshotting failure on debug native strip task:
+// :app:stripDebugDebugSymbols -> NoSuchFileException for stripped_native_libs/x86/*.so
+// This only affects debug packaging in this project, so we disable that task in debug.
+tasks.matching { it.name == "stripDebugDebugSymbols" }.configureEach {
+    enabled = false
+}
+
 dependencies {
     // Core Android
     implementation(libs.androidx.core.ktx)

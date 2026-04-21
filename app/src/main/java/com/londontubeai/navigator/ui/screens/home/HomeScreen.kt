@@ -93,6 +93,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -106,6 +107,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -128,6 +130,7 @@ import com.londontubeai.navigator.ui.theme.StatusSevere
 import com.londontubeai.navigator.ui.theme.TubeAccent
 import com.londontubeai.navigator.ui.theme.TubePrimary
 import com.londontubeai.navigator.ui.theme.TubePrimaryLight
+import com.londontubeai.navigator.ui.theme.brandGradient
 import com.londontubeai.navigator.ui.theme.TubeSecondary
 import com.londontubeai.navigator.ui.theme.Spacing
 import com.londontubeai.navigator.ui.theme.cardPadding
@@ -149,7 +152,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    onNavigateToRoute: () -> Unit,
+    onNavigateToRoute: (String?, String?, Double?, Double?) -> Unit,
     onNavigateToStatus: () -> Unit,
     onNavigateToStations: () -> Unit,
     onNavigateToMap: () -> Unit,
@@ -158,8 +161,43 @@ fun HomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val recentJourneys by viewModel.recentJourneys.collectAsStateWithLifecycle()
+    // Gate the auto-refresh loop on this screen being attached.
+    DisposableEffect(Unit) {
+        viewModel.setScreenActive(true)
+        onDispose { viewModel.setScreenActive(false) }
+    }
     var selectedLineStatus by remember { mutableStateOf<LineStatus?>(null) }
     var selectedInsight by remember { mutableStateOf<AiInsight?>(null) }
+    val openBlankRoute = remember(onNavigateToRoute) {
+        { onNavigateToRoute(null, null, null, null) }
+    }
+    val openCommuteRoute = remember(onNavigateToRoute, uiState.commuteDestinationId, uiState.commuteDestinationName) {
+        {
+            onNavigateToRoute(
+                uiState.commuteDestinationId,
+                uiState.commuteDestinationName,
+                null,
+                null,
+            )
+        }
+    }
+    val primaryAction = remember(
+        uiState.severeDisruptionCount,
+        uiState.crowdLevel,
+        uiState.leaveNowAssistant,
+        uiState.commuteDestinationId,
+    ) {
+        when {
+            uiState.severeDisruptionCount > 0 -> HomePrimaryActionType.STATUS
+            uiState.crowdLevel.percentage >= 0.8f &&
+                uiState.leaveNowAssistant?.status !in setOf(
+                    LeaveNowStatus.SOON,
+                    LeaveNowStatus.NOW,
+                    LeaveNowStatus.LATE,
+                ) -> HomePrimaryActionType.MAP
+            else -> HomePrimaryActionType.ROUTE
+        }
+    }
     
     var permissionsState by remember { mutableStateOf(PermissionsState()) }
     var showPermissionDialog by remember { mutableStateOf(false) }
@@ -190,7 +228,7 @@ fun HomeScreen(
 
     PullToRefreshBox(
         isRefreshing = uiState.isLoadingStatus,
-        onRefresh = { viewModel.loadLineStatuses() },
+        onRefresh = { viewModel.refreshHomeData() },
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -201,7 +239,7 @@ fun HomeScreen(
                 HeroHeader(
                     goodServiceCount = uiState.lineStatuses.count { it.isGoodService },
                     totalLines = uiState.lineStatuses.size,
-                    onRefresh = { viewModel.loadLineStatuses() },
+                    onRefresh = { viewModel.refreshHomeData() },
                     stationCount = uiState.networkStationCount,
                     lineCount = uiState.networkLineCount,
                     stepFreeCount = uiState.stepFreeCount,
@@ -224,7 +262,7 @@ fun HomeScreen(
                 item {
                     LeaveNowAssistantCard(
                         assistant = uiState.leaveNowAssistant!!,
-                        onOpenRoute = onNavigateToRoute,
+                        onOpenRoute = openCommuteRoute,
                     )
                 }
             }
@@ -238,7 +276,9 @@ fun HomeScreen(
                         commuteTime = uiState.commuteTimeEstimate,
                         disruptionCount = uiState.lineStatuses.count { !it.isGoodService },
                         snapshot = uiState.commuterSnapshot,
-                        onStartCommute = onNavigateToRoute,
+                        healthScore = uiState.commuteHealthScore,
+                        extraDelayMinutes = uiState.commuteExtraDelayMinutes,
+                        onStartCommute = openCommuteRoute,
                         onOpenStatus = onNavigateToStatus,
                     )
                 }
@@ -248,7 +288,7 @@ fun HomeScreen(
                 item {
                     FallbackRoutesCard(
                         options = uiState.fallbackRoutes,
-                        onOpenRoute = onNavigateToRoute,
+                        onOpenRoute = openCommuteRoute,
                     )
                 }
             }
@@ -259,7 +299,7 @@ fun HomeScreen(
                     WelcomeTipsCard(
                         visitorGuides = uiState.visitorLandmarks,
                         onExploreStations = onNavigateToStations,
-                        onPlanJourney = onNavigateToRoute,
+                        onPlanJourney = openBlankRoute,
                         onOpenNearby = onNavigateToNearby,
                     )
                 }
@@ -268,7 +308,11 @@ fun HomeScreen(
             // ── Quick Actions Grid ──────────────────────────────
             item {
                 QuickActions(
-                    onRouteClick = onNavigateToRoute,
+                    primaryAction = primaryAction,
+                    commuteDestinationName = uiState.commuteDestinationName,
+                    disruptionCount = uiState.severeDisruptionCount,
+                    crowdLabel = uiState.crowdLevel.label,
+                    onRouteClick = if (uiState.commuteDestinationId != null) openCommuteRoute else openBlankRoute,
                     onStatusClick = onNavigateToStatus,
                     onStationsClick = onNavigateToStations,
                     onMapClick = onNavigateToMap,
@@ -431,25 +475,18 @@ fun HomeScreen(
                 item { 
                     StatusErrorCard(
                         error = uiState.statusError ?: "An error occurred.",
-                        onRetry = { viewModel.loadLineStatuses() }
+                        onRetry = { viewModel.refreshHomeData() }
                     ) 
                 }
             } else {
-                itemsIndexed(uiState.lineStatuses) { index, status ->
-                    AnimatedVisibility(
-                        visible = true,
-                        enter = fadeIn(tween(300, delayMillis = index * 50)) +
-                                slideInVertically(
-                                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-                                    initialOffsetY = { it / 3 },
-                                ),
-                    ) {
-                        TubeLineStatusCard(
-                            status = status,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-                            onClick = { selectedLineStatus = status },
-                        )
-                    }
+                itemsIndexed(uiState.lineStatuses, key = { _, status -> status.lineId }) { _, status ->
+                    // Avoid re-triggering entry animations on every auto-refresh \u2014 a stable key
+                    // makes Lazy column reuse the same slot so contents fade in only once.
+                    TubeLineStatusCard(
+                        status = status,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                        onClick = { selectedLineStatus = status },
+                    )
                 }
             }
 
@@ -472,48 +509,61 @@ fun HomeScreen(
         }
 
         selectedInsight?.let { insight ->
-            ModalBottomSheet(
-                onDismissRequest = { selectedInsight = null },
-            ) {
-                InsightDetailSheet(
-                    insight = insight,
-                    onTakeAction = {
-                        selectedInsight = null
-                        when (insight.type) {
-                            InsightType.DELAY_WARNING,
-                            InsightType.CROWD_ALERT,
-                            InsightType.DISRUPTION_IMPACT,
-                            InsightType.EVENT_ALERT,
-                            -> onNavigateToStatus()
+             ModalBottomSheet(
+                 onDismissRequest = { selectedInsight = null },
+             ) {
+                 InsightDetailSheet(
+                     insight = insight,
+                     onDismiss = { selectedInsight = null },
+                     onTakeAction = {
+                         selectedInsight = null
+                         when {
+                             insight.actionLabel?.contains("status", ignoreCase = true) == true -> onNavigateToStatus()
+                             insight.actionLabel?.contains("crowd map", ignoreCase = true) == true -> onNavigateToMap()
+                             insight.actionLabel?.contains("nearby", ignoreCase = true) == true -> onNavigateToNearby()
+                             insight.actionLabel?.contains("station", ignoreCase = true) == true -> onNavigateToStations()
+                             insight.type in setOf(
+                                 InsightType.DELAY_WARNING,
+                                 InsightType.DISRUPTION_IMPACT,
+                                 InsightType.EVENT_ALERT,
+                             ) -> onNavigateToStatus()
+                             insight.type == InsightType.CROWD_ALERT -> onNavigateToMap()
+                             insight.type in setOf(
+                                 InsightType.CARRIAGE_TIP,
+                                 InsightType.PERSONAL_ROUTE,
+                                 InsightType.TIME_SAVING,
+                                 InsightType.TIME_PREFERENCE,
+                                 InsightType.SAVINGS_OPPORTUNITY,
+                             ) -> if (uiState.commuteDestinationId != null) openCommuteRoute() else openBlankRoute()
+                             else -> onNavigateToStations()
+                         }
+                     },
+                 )
+             }
+         }
+     }
+ }
 
-                            InsightType.CARRIAGE_TIP,
-                            InsightType.PERSONAL_ROUTE,
-                            InsightType.TIME_SAVING,
-                            InsightType.TIME_PREFERENCE,
-                            InsightType.SAVINGS_OPPORTUNITY,
-                            -> onNavigateToRoute()
+ private enum class HomePrimaryActionType {
+     ROUTE,
+     STATUS,
+     MAP,
+ }
 
-                            InsightType.STATION_HABIT,
-                            InsightType.GENERAL,
-                            InsightType.SOCIAL_INSIGHT,
-                            InsightType.LEARNING_PATTERN,
-                            InsightType.WEATHER_IMPACT,
-                            -> onNavigateToStations()
-                        }
-                    },
-                    onDismiss = { selectedInsight = null },
-                )
-            }
-        }
-    }
-}
+ private data class HomeQuickActionSpec(
+     val title: String,
+     val subtitle: String,
+     val icon: ImageVector,
+     val color: Color,
+     val onClick: () -> Unit,
+ )
 
-// ═══════════════════════════════════════════════════════════════
-// HERO HEADER — Glassmorphism-inspired with health ring + live clock
-// ═══════════════════════════════════════════════════════════════
+ // ═══════════════════════════════════════════════════════════════
+ // HERO HEADER — Glassmorphism-inspired with health ring + live clock
+ // ═══════════════════════════════════════════════════════════════
 
-@Composable
-private fun HeroHeader(
+ @Composable
+ private fun HeroHeader(
     goodServiceCount: Int,
     totalLines: Int,
     onRefresh: () -> Unit,
@@ -559,18 +609,11 @@ private fun HeroHeader(
         label = "health",
     )
 
+    val heroGradient = brandGradient()
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF0A1628),
-                        Color(0xFF0D2240),
-                        TubePrimary.copy(alpha = 0.95f),
-                    ),
-                )
-            ),
+            .background(heroGradient.vertical()),
     ) {
         // Subtle decorative circles
         Canvas(modifier = Modifier.matchParentSize()) {
@@ -1831,6 +1874,8 @@ private fun QuickCommuteCard(
     commuteTime: String?,
     disruptionCount: Int,
     snapshot: CommuterSnapshot?,
+    healthScore: Int? = null,
+    extraDelayMinutes: Int? = null,
     onStartCommute: () -> Unit,
     onOpenStatus: () -> Unit,
 ) {
@@ -1910,17 +1955,37 @@ private fun QuickCommuteCard(
                     }
                 }
                 commuteTime?.let {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = TubePrimary.copy(alpha = 0.1f),
-                    ) {
-                        Text(
-                            text = it,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = TubePrimary,
-                        )
+                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = TubePrimary.copy(alpha = 0.1f),
+                        ) {
+                            Text(
+                                text = it,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = TubePrimary,
+                            )
+                        }
+                        // Phase D: Commute health score pill \u2014 at-a-glance score 0\u2013100.
+                        healthScore?.let { score ->
+                            val (label, color) = when {
+                                score >= 80 -> "Healthy" to StatusGood
+                                score >= 55 -> "OK" to StatusMinor
+                                else -> "Strained" to StatusSevere
+                            }
+                            val delaySuffix = extraDelayMinutes?.takeIf { d -> d > 0 }?.let { d -> " · +${d}m" } ?: ""
+                            Surface(shape = RoundedCornerShape(8.dp), color = color.copy(alpha = 0.12f)) {
+                                Text(
+                                    text = "$score\u202f\u00b7\u202f$label$delaySuffix",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = color,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -2382,49 +2447,89 @@ private fun VisitorLandmarkRow(guide: VisitorLandmarkGuide) {
 
 @Composable
 private fun QuickActions(
+    primaryAction: HomePrimaryActionType,
+    commuteDestinationName: String?,
+    disruptionCount: Int,
+    crowdLabel: String,
     onRouteClick: () -> Unit,
     onStatusClick: () -> Unit,
     onStationsClick: () -> Unit,
     onMapClick: () -> Unit = {},
 ) {
+    val primaryCard = when (primaryAction) {
+        HomePrimaryActionType.STATUS -> HomeQuickActionSpec(
+            title = "Check disruptions",
+            subtitle = if (disruptionCount > 0) "$disruptionCount severe network issue${if (disruptionCount == 1) "" else "s"} active right now" else "See the latest live line status updates",
+            icon = Icons.Filled.Wifi,
+            color = StatusSevere,
+            onClick = onStatusClick,
+        )
+        HomePrimaryActionType.MAP -> HomeQuickActionSpec(
+            title = "Open the map",
+            subtitle = "$crowdLabel conditions are building — explore live trains and hotspots",
+            icon = Icons.Filled.Map,
+            color = TubeAccent,
+            onClick = onMapClick,
+        )
+        HomePrimaryActionType.ROUTE -> HomeQuickActionSpec(
+            title = commuteDestinationName?.let { "Commute to $it" } ?: "Where to?",
+            subtitle = commuteDestinationName?.let { "Jump straight into your usual trip in one tap" } ?: "Start a fast journey plan with AI guidance",
+            icon = Icons.Filled.Route,
+            color = TubePrimary,
+            onClick = onRouteClick,
+        )
+    }
+    val secondaryActions = when (primaryAction) {
+        HomePrimaryActionType.STATUS -> listOf(
+            HomeQuickActionSpec("Route", "Plan", Icons.Filled.Route, TubePrimary, onRouteClick),
+            HomeQuickActionSpec("Map", "Crowding", Icons.Filled.Map, TubeAccent, onMapClick),
+            HomeQuickActionSpec("Stations", "Browse", Icons.Filled.MyLocation, TubeSecondary, onStationsClick),
+        )
+        HomePrimaryActionType.MAP -> listOf(
+            HomeQuickActionSpec("Route", "Plan", Icons.Filled.Route, TubePrimary, onRouteClick),
+            HomeQuickActionSpec("Status", "Live now", Icons.Filled.Wifi, StatusGood, onStatusClick),
+            HomeQuickActionSpec("Stations", "Browse", Icons.Filled.MyLocation, TubeSecondary, onStationsClick),
+        )
+        HomePrimaryActionType.ROUTE -> listOf(
+            HomeQuickActionSpec("Status", "Live now", Icons.Filled.Wifi, StatusGood, onStatusClick),
+            HomeQuickActionSpec("Map", "Explore", Icons.Filled.Map, TubeAccent, onMapClick),
+            HomeQuickActionSpec("Stations", "Browse", Icons.Filled.MyLocation, TubeSecondary, onStationsClick),
+        )
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        PrimaryJourneyCard(onClick = onRouteClick)
+        PrimaryJourneyCard(
+            title = primaryCard.title,
+            subtitle = primaryCard.subtitle,
+            icon = primaryCard.icon,
+            accentColor = primaryCard.color,
+            onClick = primaryCard.onClick,
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            QuickActionCard(
-                title = "Status",
-                subtitle = "Live now",
-                icon = Icons.Filled.Wifi,
-                color = StatusGood,
-                modifier = Modifier.weight(1f),
-                onClick = onStatusClick,
-            )
-            QuickActionCard(
-                title = "Map",
-                subtitle = "Explore",
-                icon = Icons.Filled.Map,
-                color = TubeAccent,
-                modifier = Modifier.weight(1f),
-                onClick = onMapClick,
-            )
-            QuickActionCard(
-                title = "Stations",
-                subtitle = "Browse",
-                icon = Icons.Filled.MyLocation,
-                color = TubeSecondary,
-                modifier = Modifier.weight(1f),
-                onClick = onStationsClick,
-            )
+            secondaryActions.forEach { action ->
+                QuickActionCard(
+                    title = action.title,
+                    subtitle = action.subtitle,
+                    icon = action.icon,
+                    color = action.color,
+                    modifier = Modifier.weight(1f),
+                    onClick = action.onClick,
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun PrimaryJourneyCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    accentColor: Color,
     onClick: () -> Unit,
 ) {
     Card(
@@ -2433,13 +2538,13 @@ private fun PrimaryJourneyCard(
             .shadow(
                 elevation = 10.dp,
                 shape = RoundedCornerShape(28.dp),
-                ambientColor = TubePrimary.copy(alpha = 0.10f),
-                spotColor = TubePrimary.copy(alpha = 0.12f),
+                ambientColor = accentColor.copy(alpha = 0.10f),
+                spotColor = accentColor.copy(alpha = 0.12f),
             )
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            containerColor = accentColor.copy(alpha = 0.12f).compositeOver(MaterialTheme.colorScheme.surface),
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
@@ -2453,45 +2558,49 @@ private fun PrimaryJourneyCard(
                 modifier = Modifier
                     .size(54.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.10f)),
+                    .background(accentColor.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Route,
+                    imageVector = icon,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    tint = accentColor,
                     modifier = Modifier.size(26.dp),
                 )
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Where to?",
+                    text = title,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Start a fast journey plan with AI guidance",
+                    text = subtitle,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = accentColor,
             ) {
                 Text(
-                    text = "Go",
+                    text = if (primaryActionForLabel(title)) "Go" else "Open",
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    color = Color.White,
                 )
             }
         }
     }
+}
+
+private fun primaryActionForLabel(title: String): Boolean {
+    return title.contains("Commute", ignoreCase = true) || title.contains("Where to", ignoreCase = true)
 }
 
 @Composable
@@ -2580,6 +2689,7 @@ private fun AiInsightCard(
     onInsightClick: (AiInsight) -> Unit = {},
     onActionClick: ((AiInsight) -> Unit)? = null,
 ) {
+    val freshnessLabel = insight.metadata["freshnessLabel"] as? String
     val (iconTint, bgColor) = when (insight.type) {
         InsightType.CROWD_ALERT -> StatusSevere to StatusSevere.copy(alpha = 0.06f)
         InsightType.DELAY_WARNING -> StatusMinor to StatusMinor.copy(alpha = 0.06f)
@@ -2713,10 +2823,19 @@ private fun AiInsightCard(
                                 fontSize = 10.sp,
                             )
                         }
+                        if (freshnessLabel != null) {
+                            if (insight.confidence > 0) Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = freshnessLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 10.sp,
+                            )
+                        }
                         
                         // Priority indicator
                         if (insight.userImpact == UserImpact.HIGH || insight.userImpact == UserImpact.CRITICAL) {
-                            if (insight.confidence > 0) Spacer(modifier = Modifier.width(6.dp))
+                            if (insight.confidence > 0 || freshnessLabel != null) Spacer(modifier = Modifier.width(6.dp))
                             Icon(
                                 imageVector = Icons.Filled.PriorityHigh,
                                 contentDescription = "High Priority",
@@ -2727,7 +2846,7 @@ private fun AiInsightCard(
                         
                         // Live indicator text
                         if (insight.isLive) {
-                            if (insight.confidence > 0 || insight.userImpact >= UserImpact.HIGH) Spacer(modifier = Modifier.width(6.dp))
+                            if (insight.confidence > 0 || freshnessLabel != null || insight.userImpact >= UserImpact.HIGH) Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "LIVE",
                                 style = MaterialTheme.typography.labelSmall,

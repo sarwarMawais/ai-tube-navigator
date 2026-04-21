@@ -2,13 +2,17 @@ package com.londontubeai.navigator.utils
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.location.Geocoder
 import android.location.Location
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -72,5 +76,18 @@ class LocationService @Inject constructor(
         val c = 2 * atan2(sqrt(a), sqrt(1 - a))
         
         return earthRadius * c
+    }
+
+    suspend fun reverseGeocode(latitude: Double, longitude: Double): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val geocoder = Geocoder(context, Locale.UK)
+            val address = geocoder.getFromLocation(latitude, longitude, 1)?.firstOrNull() ?: return@runCatching null
+            listOfNotNull(
+                address.thoroughfare?.takeIf { it.isNotBlank() },
+                address.subLocality?.takeIf { it.isNotBlank() },
+                address.locality?.takeIf { it.isNotBlank() },
+                address.adminArea?.takeIf { it.isNotBlank() },
+            ).distinct().take(2).joinToString(", ").ifBlank { null }
+        }.getOrNull()
     }
 }

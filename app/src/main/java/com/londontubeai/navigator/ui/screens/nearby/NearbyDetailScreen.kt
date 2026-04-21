@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,6 +75,7 @@ import com.londontubeai.navigator.ui.theme.StatusSevere
 import com.londontubeai.navigator.ui.theme.TubeAccent
 import com.londontubeai.navigator.ui.theme.TubePrimary
 import com.londontubeai.navigator.ui.theme.TubeSecondary
+import com.londontubeai.navigator.ui.theme.brandGradient
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
@@ -90,6 +92,7 @@ private val TubeBlue = Color(0xFF003688)
 fun NearbyDetailScreen(
     onBack: () -> Unit,
     onStationClick: (String) -> Unit,
+    onNavigateToRoute: (String?, String?, Double?, Double?) -> Unit = { _, _, _, _ -> },
     viewModel: NearbyDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -107,6 +110,7 @@ fun NearbyDetailScreen(
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                 }
+
                 IconButton(onClick = { viewModel.refresh() }) {
                     Icon(Icons.Filled.Refresh, "Refresh", tint = Color.White)
                 }
@@ -114,10 +118,14 @@ fun NearbyDetailScreen(
         )
 
         when {
-            uiState.isLoading -> LoadingState()
+            uiState.isLoading && uiState.nearbyStations.isEmpty() -> LoadingState()
             uiState.error != null -> ErrorState(uiState.error!!, onRetry = { viewModel.refresh() })
             uiState.nearbyStations.isEmpty() -> EmptyState()
-            else -> {
+            else -> androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+                isRefreshing = uiState.isLoading,
+                onRefresh = { viewModel.refresh() },
+                modifier = Modifier.fillMaxSize(),
+            ) {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars),
                     contentPadding = PaddingValues(
@@ -132,6 +140,13 @@ fun NearbyDetailScreen(
                         NearbyOverviewCard(uiState = uiState)
                     }
 
+                    item {
+                        NearbySortRow(
+                            selected = uiState.sortMode,
+                            onSelect = viewModel::setSortMode,
+                        )
+                    }
+
                     // Journey mode legend
                     item {
                         JourneyModeLegend()
@@ -142,9 +157,43 @@ fun NearbyDetailScreen(
                             nearbyStation = nearbyStation,
                             index = index,
                             onStationClick = { onStationClick(nearbyStation.station.id) },
+                            onNavigateToRoute = {
+                                onNavigateToRoute(
+                                    nearbyStation.station.id,
+                                    nearbyStation.station.name,
+                                    nearbyStation.station.latitude,
+                                    nearbyStation.station.longitude,
+                                )
+                            },
+                            onExpand = { viewModel.onStationExpanded(nearbyStation.station.id) },
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NearbySortRow(
+    selected: NearbySortMode,
+    onSelect: (NearbySortMode) -> Unit,
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(NearbySortMode.entries) { sortMode ->
+            val selectedChip = selected == sortMode
+            Surface(
+                modifier = Modifier.clickable { onSelect(sortMode) },
+                shape = RoundedCornerShape(12.dp),
+                color = if (selectedChip) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ) {
+                Text(
+                    text = sortMode.label,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (selectedChip) FontWeight.Bold else FontWeight.Medium,
+                    color = if (selectedChip) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -156,20 +205,18 @@ private fun NearbyOverviewCard(uiState: NearbyDetailUiState) {
     val liveArrivalCount = uiState.nearbyStations.sumOf { it.arrivals.size }
     val busCount = uiState.nearbyStations.sumOf { it.busRoutes.size }
     val closestStation = uiState.nearbyStations.minByOrNull { it.distanceKm }
-    val disruptedLines = uiState.nearbyStations.flatMap { it.lineStatuses }.count { !it.isGoodService }
+    val disruptedLines = uiState.nearbyStations
+        .flatMap { it.lineStatuses }
+        .filter { !it.isGoodService }
+        .distinctBy { it.lineId }
+        .size
 
+    val gradient = brandGradient()
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFF0A1628),
-                        Color(0xFF0D2240),
-                    )
-                )
-            ),
+            .background(gradient.linear()),
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -192,25 +239,34 @@ private fun NearbyOverviewCard(uiState: NearbyDetailUiState) {
                     Text(
                         text = closestStation?.let {
                             "Nearest: ${it.station.name} · ${if (it.distanceKm < 1.0) "${(it.distanceKm * 1000).toInt()}m" else "${"%.1f".format(it.distanceKm)}km"}"
-                        } ?: "Stations within 2.8 km radius",
+                        } ?: "Stations within 4.8 km radius",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.65f),
                     )
                 }
-                if (disruptedLines > 0) {
-                    Surface(shape = RoundedCornerShape(8.dp), color = StatusSevere.copy(alpha = 0.2f)) {
-                        Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(StatusSevere))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("$disruptedLines disrupted", style = MaterialTheme.typography.labelSmall, color = StatusSevere, fontWeight = FontWeight.Bold)
-                        }
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    uiState.overviewUpdatedAt?.let { updatedAt ->
+                        SourcePill(
+                            label = "${sourceLabel(uiState.overviewSource)} · ${formatFreshness(updatedAt)}",
+                            source = uiState.overviewSource,
+                        )
                     }
-                } else {
-                    Surface(shape = RoundedCornerShape(8.dp), color = StatusGood.copy(alpha = 0.2f)) {
-                        Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(StatusGood))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Good service", style = MaterialTheme.typography.labelSmall, color = StatusGood, fontWeight = FontWeight.Bold)
+                    if (disruptedLines > 0) {
+                        Surface(shape = RoundedCornerShape(8.dp), color = StatusSevere.copy(alpha = 0.2f)) {
+                            Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(modifier = Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(StatusSevere))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("$disruptedLines disrupted", style = MaterialTheme.typography.labelSmall, color = StatusSevere, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        Surface(shape = RoundedCornerShape(8.dp), color = StatusGood.copy(alpha = 0.2f)) {
+                            Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(modifier = Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(StatusGood))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Good service", style = MaterialTheme.typography.labelSmall, color = StatusGood, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -339,8 +395,14 @@ private fun NearbyStationCard(
     nearbyStation: NearbyStation,
     index: Int,
     onStationClick: () -> Unit,
+    onNavigateToRoute: () -> Unit,
+    onExpand: () -> Unit = {},
 ) {
-    var expanded by remember { mutableStateOf(index == 0) }
+    var expanded by remember(nearbyStation.station.id) { mutableStateOf(index == 0) }
+    // Fire a lazy enrichment request the first time the card opens.
+    androidx.compose.runtime.LaunchedEffect(expanded, nearbyStation.enriched, nearbyStation.isEnriching) {
+        if (expanded && !nearbyStation.enriched && !nearbyStation.isEnriching) onExpand()
+    }
     val station = nearbyStation.station
     val stationLines = remember(station.id) { TubeData.getLinesForStation(station.id) }
     val distColor = when {
@@ -437,6 +499,23 @@ private fun NearbyStationCard(
                                 Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(line.color))
                             }
                         }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SourcePill(
+                                label = buildString {
+                                    append(sourceLabel(nearbyStation.tubeSource))
+                                    nearbyStation.arrivalsUpdatedAt?.let {
+                                        append(" · ")
+                                        append(formatFreshness(it))
+                                    }
+                                },
+                                source = nearbyStation.tubeSource,
+                            )
+                            SourcePill(
+                                label = "Bus ${sourceLabel(nearbyStation.busSource)}",
+                                source = nearbyStation.busSource,
+                            )
+                        }
                     }
 
                     Column(horizontalAlignment = Alignment.End) {
@@ -496,6 +575,38 @@ private fun NearbyStationCard(
                     }
                 }
 
+                nearbyStation.accessOption?.let { accessOption ->
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = Spacing.md, vertical = 10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.NearMe, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    accessOption.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                SourcePill(
+                                    label = sourceLabel(accessOption.source),
+                                    source = accessOption.source,
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                accessOption.summary,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
                 if (nearbyStation.lineStatuses.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(Spacing.md))
                     LineStatusStrip(nearbyStation.lineStatuses)
@@ -512,7 +623,9 @@ private fun NearbyStationCard(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Train, null, tint = TubeBlue, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Live Tube Arrivals", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = TubeBlue, modifier = Modifier.weight(1f))
+                                Text("Tube Arrivals", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = TubeBlue, modifier = Modifier.weight(1f))
+                                SourcePill(label = sourceLabel(nearbyStation.tubeSource), source = nearbyStation.tubeSource)
+                                Spacer(modifier = Modifier.width(8.dp))
                                 if (nearbyStation.isLoadingArrivals) {
                                     CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = TubeBlue)
                                 }
@@ -542,7 +655,8 @@ private fun NearbyStationCard(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.DirectionsBus, null, tint = BusRed, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Bus Connections", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = BusRed)
+                                Text("Bus Connections", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = BusRed, modifier = Modifier.weight(1f))
+                                SourcePill(label = sourceLabel(nearbyStation.busSource), source = nearbyStation.busSource)
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             nearbyStation.busRoutes.forEach { bus ->
@@ -550,22 +664,54 @@ private fun NearbyStationCard(
                                 Spacer(modifier = Modifier.height(Spacing.sm))
                             }
                             Spacer(modifier = Modifier.height(Spacing.md))
+                        } else if (nearbyStation.accessOption?.busRouteNumber != null) {
+                            Surface(shape = RoundedCornerShape(12.dp), color = BusRed.copy(alpha = 0.06f)) {
+                                Row(modifier = Modifier.fillMaxWidth().padding(Spacing.md), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.DirectionsBus, null, tint = BusRed, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "TfL journey planner suggests bus ${nearbyStation.accessOption.busRouteNumber} on the way here",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(Spacing.md))
                         }
 
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            onClick = onStationClick,
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(Spacing.md),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically,
+                        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                onClick = onNavigateToRoute,
                             ) {
-                                Icon(Icons.Filled.Train, null, tint = Color.White, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(Spacing.sm))
-                                Text("Full Station Details", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
+                                Row(
+                                    modifier = Modifier.padding(Spacing.md),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(Icons.Filled.LocationOn, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(Spacing.sm))
+                                    Text("Route here", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                onClick = onStationClick,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(Spacing.md),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(Icons.Filled.Train, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(Spacing.sm))
+                                    Text("Full details", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
+                                }
                             }
                         }
                     }
@@ -704,12 +850,52 @@ private fun ArrivalRow(arrival: StationArrivalInfo) {
 }
 
 @Composable
+private fun SourcePill(
+    label: String,
+    source: NearbyDataSource,
+) {
+    val color = when (source) {
+        NearbyDataSource.LIVE -> StatusGood
+        NearbyDataSource.CACHED -> StatusMinor
+        NearbyDataSource.INFERRED -> TubeAccent
+    }
+    Surface(shape = RoundedCornerShape(8.dp), color = color.copy(alpha = 0.12f)) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private fun sourceLabel(source: NearbyDataSource): String {
+    return when (source) {
+        NearbyDataSource.LIVE -> "Live"
+        NearbyDataSource.CACHED -> "Cached"
+        NearbyDataSource.INFERRED -> "Inferred"
+    }
+}
+
+private fun formatFreshness(updatedAt: Long): String {
+    val ageMinutes = ((System.currentTimeMillis() - updatedAt) / 60_000L).coerceAtLeast(0L)
+    return when {
+        ageMinutes == 0L -> "Updated just now"
+        ageMinutes < 60L -> "Updated ${ageMinutes}m ago"
+        else -> "Updated ${ageMinutes / 60L}h ago"
+    }
+}
+
+@Composable
 private fun LoadingState() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Box(
                 modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFF0A1628), Color(0xFF0D2240)))),
+                    .background(brandGradient().linear()),
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp), strokeWidth = 3.dp)
@@ -755,7 +941,7 @@ private fun EmptyState() {
                 Icon(Icons.Filled.NearMe, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
             }
             Text("No Stations Nearby", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("No tube stations found within 5 km of your location", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Text("No tube stations found within 4.8 km of your location", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
     }
 }

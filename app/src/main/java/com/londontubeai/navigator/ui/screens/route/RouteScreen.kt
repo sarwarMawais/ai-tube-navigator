@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Co2
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.DirectionsSubway
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.FitnessCenter
@@ -139,6 +140,7 @@ import kotlinx.coroutines.launch
 import com.londontubeai.navigator.data.model.CrowdLevel
 import com.londontubeai.navigator.data.model.JourneyLeg
 import com.londontubeai.navigator.data.model.JourneyRoute
+import com.londontubeai.navigator.data.model.RouteSource
 import com.londontubeai.navigator.data.model.TransportMode
 import com.londontubeai.navigator.data.model.TubeData
 import com.londontubeai.navigator.ui.components.CarriageVisualizer
@@ -160,6 +162,9 @@ fun RouteScreen(
     viewModel: RouteViewModel = hiltViewModel(),
     onNavigateToMap: (String, String) -> Unit = { _, _ -> },
     initialToStationId: String? = null,
+    initialToPlaceName: String? = null,
+    initialToPlaceLat: Double? = null,
+    initialToPlaceLng: Double? = null,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val recentJourneys by viewModel.recentJourneys.collectAsStateWithLifecycle()
@@ -170,10 +175,13 @@ fun RouteScreen(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var showTimePicker by remember { mutableStateOf(false) }
+    var pendingDepartureOption by remember { mutableStateOf<DepartureOption?>(null) }
 
-    LaunchedEffect(initialToStationId) {
+    LaunchedEffect(initialToStationId, initialToPlaceName, initialToPlaceLat, initialToPlaceLng) {
         if (!initialToStationId.isNullOrBlank()) {
             viewModel.preSelectToStation(initialToStationId)
+        } else if (!initialToPlaceName.isNullOrBlank() && initialToPlaceLat != null && initialToPlaceLng != null) {
+            viewModel.preSelectToPlace(initialToPlaceName, initialToPlaceLat, initialToPlaceLng)
         }
     }
 
@@ -213,8 +221,13 @@ fun RouteScreen(
             onClearTo = { viewModel.updateToQuery("") },
             onSelectPreference = { viewModel.selectPreference(it) },
             onSelectDeparture = { opt ->
-                viewModel.selectDepartureOption(opt)
-                if (opt != DepartureOption.LEAVE_NOW) showTimePicker = true
+                if (opt == DepartureOption.LEAVE_NOW) {
+                    pendingDepartureOption = null
+                    viewModel.selectDepartureOption(opt)
+                } else {
+                    pendingDepartureOption = opt
+                    showTimePicker = true
+                }
             },
         )
 
@@ -247,10 +260,20 @@ fun RouteScreen(
                         shape = RoundedCornerShape(14.dp),
                         color = StatusSevere.copy(alpha = 0.08f),
                     ) {
-                        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Info, null, tint = StatusSevere, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(uiState.routeError ?: "", style = MaterialTheme.typography.bodySmall, color = StatusSevere)
+                        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Info, null, tint = StatusSevere, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(uiState.routeError ?: "", style = MaterialTheme.typography.bodySmall, color = StatusSevere, modifier = Modifier.weight(1f))
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                TextButton(onClick = { viewModel.recalculate() }) {
+                                    Icon(Icons.Filled.SyncAlt, null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Try Again", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
                         }
                     }
                 }
@@ -335,13 +358,22 @@ fun RouteScreen(
                         departureOption = uiState.departureOption,
                         currentHour = uiState.currentHour,
                         currentMinute = uiState.currentMinute,
+                        isRefreshing = uiState.isRefreshing || uiState.isCalculating,
+                        lastPlannedEpochMs = uiState.lastPlannedEpochMs,
+                        onRefresh = { viewModel.refresh() },
+                        onShiftEarlier = { viewModel.shiftDepartureTime(-15) },
+                        onShiftLater = { viewModel.shiftDepartureTime(15) },
                     )
                 }
 
                 // Google Maps-style step-by-step timeline
                 if (route != null && route.legs.isNotEmpty()) {
                     item {
-                        GoogleMapsTimelineCard(route = route, isInsideLondon = uiState.isInsideLondon)
+                        GoogleMapsTimelineCard(
+                            route = route,
+                            isInsideLondon = uiState.isInsideLondon,
+                            lineStatuses = uiState.lineStatuses,
+                        )
                     }
                 }
 
@@ -489,14 +521,17 @@ fun RouteScreen(
                             icon = Icons.Filled.Notifications,
                             label = if (uiState.reminderSet) "Set" else "Remind",
                             active = uiState.reminderSet,
-                            onClick = { viewModel.setReminder(); scope.launch { snackbarHostState.showSnackbar("Reminder set for this journey") } },
+                            onClick = {
+                                val message = viewModel.setReminder()
+                                scope.launch { snackbarHostState.showSnackbar(message) }
+                            },
                         )
                     }
                 }
             }
 
-            // ── Nearby Buses from Current Location ─────────────────
-            if (uiState.isInsideLondon && (uiState.nearbyBusRoutes.isNotEmpty() || uiState.isFetchingBuses)) {
+            // ── Nearby Buses — only when no route has been calculated ──────
+            if (!uiState.routeCalculated && uiState.isInsideLondon && (uiState.nearbyBusRoutes.isNotEmpty() || uiState.isFetchingBuses)) {
                 item {
                     NearbyBusesSection(
                         busRoutes = uiState.nearbyBusRoutes,
@@ -540,9 +575,34 @@ fun RouteScreen(
                 }
             }
 
+            // ── Destination hint when from is set but to is missing ────────
+            if (!uiState.routeCalculated && !uiState.isCalculating && uiState.routeError == null
+                && (uiState.fromStation != null || uiState.fromIsAutoLocation)
+                && uiState.toStation == null && !uiState.isSearchingTo
+            ) {
+                item {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
+                    ) {
+                        Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Place, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                "Where are you going? Enter a destination above.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                    }
+                }
+            }
+
             // ── Empty State ──────────────────────────────────────
             if (!uiState.routeCalculated && !uiState.isCalculating && recentJourneys.isEmpty()
-                && uiState.fromStation == null && uiState.toStation == null
+                && uiState.fromStation == null && !uiState.fromIsAutoLocation && uiState.toStation == null
             ) {
                 item {
                     Column(
@@ -576,26 +636,28 @@ fun RouteScreen(
             initialMinute = uiState.currentMinute,
         )
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showTimePicker = false },
+            onDismissRequest = {
+                pendingDepartureOption = null
+                showTimePicker = false
+            },
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = {
-                    viewModel.selectDepartureOption(
-                        if (uiState.departureOption == DepartureOption.ARRIVE_BY) DepartureOption.ARRIVE_BY
-                        else DepartureOption.DEPART_AT,
-                    )
+                    val selectedOption = pendingDepartureOption ?: uiState.departureOption
+                    viewModel.selectDepartureOption(selectedOption)
                     viewModel.updateDepartureTime(timePickerState.hour, timePickerState.minute)
+                    pendingDepartureOption = null
                     showTimePicker = false
                 }) { Text("Confirm") }
             },
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = {
+                    pendingDepartureOption = null
                     showTimePicker = false
-                    viewModel.selectDepartureOption(DepartureOption.LEAVE_NOW)
                 }) { Text("Cancel") }
             },
             title = {
                 Text(
-                    text = if (uiState.departureOption == DepartureOption.ARRIVE_BY) "Arrive By" else "Depart At",
+                    text = if ((pendingDepartureOption ?: uiState.departureOption) == DepartureOption.ARRIVE_BY) "Arrive By" else "Depart At",
                     fontWeight = FontWeight.Bold,
                 )
             },
@@ -869,6 +931,11 @@ private fun RouteOptionsSection(
     departureOption: DepartureOption = DepartureOption.LEAVE_NOW,
     currentHour: Int = 0,
     currentMinute: Int = 0,
+    isRefreshing: Boolean = false,
+    lastPlannedEpochMs: Long = 0L,
+    onRefresh: () -> Unit = {},
+    onShiftEarlier: () -> Unit = {},
+    onShiftLater: () -> Unit = {},
 ) {
     val fastestDuration = options.firstOrNull()?.route?.totalDurationMinutes ?: 0
 
@@ -899,11 +966,73 @@ private fun RouteOptionsSection(
                         )
                     }
                 }
-                Text(
-                    "${options.size} option${if (options.size != 1) "s" else ""}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${options.size} option${if (options.size != 1) "s" else ""}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        // Live refresh button — re-runs the journey planner to
+                        // pick up fresh TfL schedules and disruption updates.
+                        Box(
+                            modifier = Modifier
+                                .padding(start = 6.dp)
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .clickable(enabled = !isRefreshing) { onRefresh() },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isRefreshing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Filled.Refresh,
+                                    contentDescription = "Refresh routes",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    }
+                    route?.source?.let { src ->
+                        val (srcLabel, srcColor) = when (src) {
+                            RouteSource.TFL_API -> "Live" to StatusGood
+                            RouteSource.CACHE -> "Cached" to StatusMinor
+                            RouteSource.LOCAL_DIJKSTRA -> "Offline" to StatusSevere
+                        }
+                        Surface(shape = RoundedCornerShape(6.dp), color = srcColor.copy(alpha = 0.12f)) {
+                            Text(
+                                srcLabel,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = srcColor,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                    // "Updated Xm ago" freshness indicator — helps users judge
+                    // whether to refresh when planning a live departure.
+                    if (lastPlannedEpochMs > 0L) {
+                        val ageMin = ((System.currentTimeMillis() - lastPlannedEpochMs) / 60_000L).toInt()
+                        val ageLabel = when {
+                            ageMin <= 0 -> "Just now"
+                            ageMin == 1 -> "1m ago"
+                            ageMin < 60 -> "${ageMin}m ago"
+                            else -> "${ageMin / 60}h ago"
+                        }
+                        Text(
+                            ageLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            fontSize = 9.sp,
+                        )
+                    }
+                }
             }
             Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)))
 
@@ -930,6 +1059,77 @@ private fun RouteOptionsSection(
                     )
                     if (index < options.size - 1) {
                         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)))
+                    }
+                }
+            }
+
+            // Earlier / Later quick-shift row — Google Maps-style buttons that
+            // jump the plan forward/back by 15 minutes without opening the
+            // full time picker. Disabled while a plan is in flight.
+            if (route != null) {
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    val enabled = !isRefreshing
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(enabled = enabled) { onShiftEarlier() },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 0.08f else 0.04f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 0.25f else 0.1f)),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Filled.ExpandLess,
+                                null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                "15m earlier",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(enabled = enabled) { onShiftLater() },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 0.08f else 0.04f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 0.25f else 0.1f)),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "15m later",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                Icons.Filled.ExpandMore,
+                                null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -970,9 +1170,28 @@ private fun RouteOptionCard(
     currentMinute: Int = Calendar.getInstance().get(Calendar.MINUTE),
 ) {
     val route = option.route
-    val (departureTime, arrivalTime) = remember(departureOption, currentHour, currentMinute, route.totalDurationMinutes) {
+    // Live-tick every 30s so times and "Leave in Xm" stay fresh as the clock advances.
+    var nowTick by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000L)
+            nowTick = System.currentTimeMillis()
+        }
+    }
+    // Prefer TfL-provided exact times when available — falls back to derived
+    // clock times so offline / Dijkstra routes still show sensible values.
+    val (departureTime, arrivalTime) = remember(
+        departureOption, currentHour, currentMinute,
+        route.totalDurationMinutes, route.scheduledDepartureEpochMs,
+        route.scheduledArrivalEpochMs, nowTick,
+    ) {
         val durMins = route.totalDurationMinutes
-        when (departureOption) {
+        val hasScheduled = route.scheduledDepartureEpochMs > 0L && route.scheduledArrivalEpochMs > 0L
+        if (hasScheduled) {
+            val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK)
+            fmt.format(java.util.Date(route.scheduledDepartureEpochMs)) to
+                fmt.format(java.util.Date(route.scheduledArrivalEpochMs))
+        } else when (departureOption) {
             DepartureOption.LEAVE_NOW -> {
                 val now = Calendar.getInstance()
                 val depH = now.get(Calendar.HOUR_OF_DAY); val depM = now.get(Calendar.MINUTE)
@@ -992,6 +1211,16 @@ private fun RouteOptionCard(
         }
     }
     val durationLabel = formatDuration(route.totalDurationMinutes)
+    // Live countdown to the scheduled departure — shown as a "Leave in Xm" chip
+    // when the selected card has a scheduled time within the next 2 hours.
+    val minutesUntilDeparture: Int? = remember(route.scheduledDepartureEpochMs, nowTick) {
+        if (route.scheduledDepartureEpochMs <= 0L) null
+        else {
+            val diffMs = route.scheduledDepartureEpochMs - nowTick
+            if (diffMs < -60_000L) null
+            else ((diffMs / 60_000L).coerceAtLeast(0L)).toInt()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1022,7 +1251,39 @@ private fun RouteOptionCard(
             if (extraMins > 0) {
                 Text("+${extraMins} min", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else if (isSelected) {
-                Icon(Icons.Filled.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                // "Leave in Xm" live countdown — uses TfL's scheduled time when available,
+                // otherwise falls back to the user-picked DEPART_AT time.
+                val countdownMins: Int? = minutesUntilDeparture
+                    ?: if (departureOption == DepartureOption.DEPART_AT) {
+                        val now = Calendar.getInstance()
+                        val nowMins = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+                        val depMins = currentHour * 60 + currentMinute
+                        (depMins - nowMins + 24 * 60) % (24 * 60)
+                    } else null
+                when {
+                    countdownMins != null && countdownMins in 0..120 -> {
+                        val chipColor = when {
+                            countdownMins <= 2 -> StatusSevere
+                            countdownMins <= 10 -> StatusMinor
+                            else -> MaterialTheme.colorScheme.primary
+                        }
+                        Surface(shape = RoundedCornerShape(6.dp), color = chipColor.copy(alpha = 0.14f)) {
+                            Text(
+                                if (countdownMins == 0) "Leave now" else "Leave in ${countdownMins}m",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = chipColor,
+                            )
+                        }
+                    }
+                    else -> Icon(
+                        Icons.Filled.CheckCircle,
+                        null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
             }
         }
 
@@ -1064,6 +1325,15 @@ private fun RouteOptionCard(
             if (route.totalStops > 0) add("${route.totalStops} stops")
             if (route.totalWalkingMinutes > 0) add("${route.totalWalkingMinutes}m walk")
             if (route.co2SavedGrams > 0) add("${route.co2SavedGrams}g CO₂")
+            // Show peak + off-peak side-by-side when they differ \u2014 helps users decide whether
+            // to shift their departure window to save money.
+            val fare = route.estimatedFarePounds
+            val peak = route.peakFarePounds
+            when {
+                fare != null && peak != null && kotlin.math.abs(peak - fare) >= 0.05 ->
+                    add("£${"%.2f".format(fare)} off-peak · £${"%.2f".format(peak)} peak")
+                fare != null -> add("£${"%.2f".format(fare)}")
+            }
         }
         Text(
             infoItems.joinToString("  ·  "),
@@ -1079,9 +1349,13 @@ private fun CompactTransitStrip(legs: List<com.londontubeai.navigator.data.model
     val walkGrey = Color(0xFF607D8B)
     // Only show meaningful legs — skip zero-duration walking
     val displayLegs = legs.filter { it.mode != TransportMode.WALKING || it.durationMinutes >= 2 }
+    val scrollState = rememberScrollState()
+    // Fade the trailing edge when more content is scrollable off-screen so users know to swipe.
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    Box(modifier = Modifier.fillMaxWidth()) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        modifier = Modifier.horizontalScroll(scrollState),
     ) {
         displayLegs.forEachIndexed { index, leg ->
             when (leg.mode) {
@@ -1124,6 +1398,19 @@ private fun CompactTransitStrip(legs: List<com.londontubeai.navigator.data.model
             if (index < displayLegs.size - 1) {
                 Text(" › ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
             }
+        }
+    }
+        // Trailing fade overlay \u2014 only when the content overflows.
+        if (scrollState.maxValue > 0 && scrollState.value < scrollState.maxValue - 4) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .width(24.dp)
+                    .background(
+                        Brush.horizontalGradient(listOf(Color.Transparent, surfaceColor))
+                    ),
+            )
         }
     }
 }
@@ -1202,9 +1489,22 @@ private fun ActionButton(
 }
 
 @Composable
-private fun GoogleMapsTimelineCard(route: com.londontubeai.navigator.data.model.JourneyRoute, isInsideLondon: Boolean) {
+private fun GoogleMapsTimelineCard(
+    route: com.londontubeai.navigator.data.model.JourneyRoute,
+    isInsideLondon: Boolean,
+    lineStatuses: List<com.londontubeai.navigator.data.model.LineStatus> = emptyList(),
+) {
     val routeKey = "${route.fromStation.id}-${route.toStation.id}-${route.totalDurationMinutes}-${route.legs.size}"
     var expanded by remember(routeKey) { mutableStateOf(true) }
+    // Live clock tick every 30s for per-leg clock times + countdowns.
+    var nowTick by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000L)
+            nowTick = System.currentTimeMillis()
+        }
+    }
+    val clockFmt = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK) }
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         shape = RoundedCornerShape(20.dp),
@@ -1279,6 +1579,34 @@ private fun GoogleMapsTimelineCard(route: com.londontubeai.navigator.data.model.
                     // Each leg
                     route.legs.forEachIndexed { idx, leg ->
                         val isLastLeg = idx == route.legs.size - 1
+                        // Live board/alight clock times + minutes-until-board
+                        // when the planner gave us scheduled times.
+                        val hasSchedule = leg.scheduledDepartureEpochMs > 0L
+                        val clockRange = if (hasSchedule && leg.scheduledArrivalEpochMs > 0L) {
+                            "${clockFmt.format(java.util.Date(leg.scheduledDepartureEpochMs))} – ${clockFmt.format(java.util.Date(leg.scheduledArrivalEpochMs))}"
+                        } else null
+                        val minsUntilBoard: Int? = if (hasSchedule) {
+                            val diffMs = leg.scheduledDepartureEpochMs - nowTick
+                            if (diffMs < -90_000L) null
+                            else ((diffMs / 60_000L).coerceAtLeast(0L)).toInt()
+                        } else null
+                        val liveExtras = buildList<String> {
+                            if (clockRange != null) add("🕑 $clockRange")
+                            if (minsUntilBoard != null && minsUntilBoard in 0..120) {
+                                add(if (minsUntilBoard == 0) "Departs now" else "in ${minsUntilBoard} min")
+                            }
+                        }
+                        // Pull the live TfL status for this tube leg's line so
+                        // we can surface non-good-service as a bold warning
+                        // extra chip directly inside the step card.
+                        val disruption = if (leg.mode == TransportMode.TUBE) {
+                            lineStatuses.firstOrNull {
+                                it.lineId.equals(leg.line.id, ignoreCase = true) && !it.isGoodService
+                            }
+                        } else null
+                        val disruptionChip: String? = disruption?.let {
+                            "⚠️ ${it.statusDescription}"
+                        }
                         when (leg.mode) {
                             TransportMode.TUBE -> {
                                 TimelineSegment(
@@ -1286,7 +1614,11 @@ private fun GoogleMapsTimelineCard(route: com.londontubeai.navigator.data.model.
                                     label = leg.line.name,
                                     subLabel = "${leg.intermediateStops} stops · ${leg.durationMinutes} min",
                                     extras = buildList {
-                                        if (leg.nextDepartureMinutes > 0) add("Next: ${leg.nextDepartureMinutes} min")
+                                        if (disruptionChip != null) add(disruptionChip)
+                                        addAll(liveExtras)
+                                        if (leg.nextDepartureMinutes > 0 && minsUntilBoard == null) {
+                                            add("Next: ${leg.nextDepartureMinutes} min")
+                                        }
                                         if (leg.platformNumber.isNotEmpty()) add(leg.platformNumber)
                                         if (leg.direction.isNotEmpty()) add(leg.direction)
                                     },
@@ -1298,11 +1630,15 @@ private fun GoogleMapsTimelineCard(route: com.londontubeai.navigator.data.model.
                                     label = "Walk",
                                     subLabel = "${leg.durationMinutes} min${if (leg.walkingDistanceMeters > 0) " · ${leg.walkingDistanceMeters}m" else ""}",
                                     isDashed = true,
-                                    extras = if (leg.walkingDirections.isNotEmpty()) listOf(leg.walkingDirections) else emptyList(),
+                                    extras = buildList {
+                                        addAll(liveExtras)
+                                        if (leg.walkingDirections.isNotEmpty()) add(leg.walkingDirections)
+                                    },
                                 )
                             }
                             TransportMode.BUS -> {
                                 val busExtras = buildList {
+                                    addAll(liveExtras)
                                     if (leg.busStopName.isNotEmpty()) add("Board: ${leg.busStopName}")
                                     if (leg.busAlightStopName.isNotEmpty()) add("Alight: ${leg.busAlightStopName}")
                                     if (leg.direction.isNotEmpty()) add(leg.direction)

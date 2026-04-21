@@ -27,7 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.londontubeai.navigator.ui.theme.TubePrimary
+import com.londontubeai.navigator.ui.theme.brandGradient
 
 @Composable
 fun UnifiedHeader(
@@ -38,18 +38,11 @@ fun UnifiedHeader(
     trailingContent: @Composable () -> Unit = {},
     bottomContent: @Composable () -> Unit = {},
 ) {
+    val gradient = brandGradient()
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF0A1628),
-                        Color(0xFF0D2240),
-                        TubePrimary.copy(alpha = 0.95f),
-                    ),
-                )
-            ),
+            .background(gradient.vertical()),
     ) {
         // Subtle decorative circles (matching Home screen)
         Canvas(modifier = Modifier.matchParentSize()) {

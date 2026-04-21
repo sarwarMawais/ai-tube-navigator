@@ -42,6 +42,9 @@ class AppPreferences @Inject constructor(
         private val KEY_MAX_WALKING_METRES = intPreferencesKey("max_walking_metres")
         private val KEY_MAX_INTERCHANGES = intPreferencesKey("max_interchanges")
         private val KEY_FAVOURITE_LINES = stringPreferencesKey("favourite_lines")
+        private val KEY_MAP_STYLE = stringPreferencesKey("map_style")
+        private val KEY_MAP_LINE_FILTER = stringPreferencesKey("map_line_filter")
+        private val KEY_RECENT_MAP_PLACES = stringPreferencesKey("recent_map_places")
     }
 
     val onboardingComplete: Flow<Boolean> = context.dataStore.data.map { it[KEY_ONBOARDING_COMPLETE] ?: false }
@@ -65,6 +68,9 @@ class AppPreferences @Inject constructor(
     val maxWalkingMetres: Flow<Int> = context.dataStore.data.map { it[KEY_MAX_WALKING_METRES] ?: 500 }
     val maxInterchanges: Flow<Int> = context.dataStore.data.map { it[KEY_MAX_INTERCHANGES] ?: 3 }
     val favouriteLines: Flow<String> = context.dataStore.data.map { it[KEY_FAVOURITE_LINES] ?: "" }
+    val mapStyle: Flow<String> = context.dataStore.data.map { it[KEY_MAP_STYLE] ?: "NORMAL" }
+    val mapLineFilter: Flow<String?> = context.dataStore.data.map { it[KEY_MAP_LINE_FILTER] }
+    val recentMapPlaces: Flow<String> = context.dataStore.data.map { it[KEY_RECENT_MAP_PLACES] ?: "" }
 
     suspend fun setOnboardingComplete(complete: Boolean) {
         context.dataStore.edit { it[KEY_ONBOARDING_COMPLETE] = complete }
@@ -154,6 +160,21 @@ class AppPreferences @Inject constructor(
 
     suspend fun setFavouriteLines(value: String) {
         context.dataStore.edit { it[KEY_FAVOURITE_LINES] = value }
+    }
+
+    suspend fun setMapStyle(value: String) {
+        context.dataStore.edit { it[KEY_MAP_STYLE] = value }
+    }
+
+    suspend fun setMapLineFilter(value: String?) {
+        context.dataStore.edit {
+            if (value == null) it.remove(KEY_MAP_LINE_FILTER)
+            else it[KEY_MAP_LINE_FILTER] = value
+        }
+    }
+
+    suspend fun setRecentMapPlaces(value: String) {
+        context.dataStore.edit { it[KEY_RECENT_MAP_PLACES] = value }
     }
 
     suspend fun clearAll() {

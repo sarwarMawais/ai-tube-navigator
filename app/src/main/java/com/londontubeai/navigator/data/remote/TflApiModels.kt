@@ -49,12 +49,18 @@ data class TflFareDetail(
 
 data class TflJourney(
     @SerializedName("duration") val duration: Int,
+    // ISO-8601 local times: e.g. "2025-04-20T21:06:00". Either may be absent.
+    @SerializedName("startDateTime") val startDateTime: String? = null,
+    @SerializedName("arrivalDateTime") val arrivalDateTime: String? = null,
     @SerializedName("legs") val legs: List<TflJourneyLeg>,
     @SerializedName("fare") val fare: TflJourneyFare? = null,
 )
 
 data class TflJourneyLeg(
     @SerializedName("duration") val duration: Int,
+    // ISO-8601 local times for this leg's board/alight moments.
+    @SerializedName("departureTime") val departureTime: String? = null,
+    @SerializedName("arrivalTime") val arrivalTime: String? = null,
     @SerializedName("instruction") val instruction: TflInstruction?,
     @SerializedName("departurePoint") val departurePoint: TflPoint?,
     @SerializedName("arrivalPoint") val arrivalPoint: TflPoint?,

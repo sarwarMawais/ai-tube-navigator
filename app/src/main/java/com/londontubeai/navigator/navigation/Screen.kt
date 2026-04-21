@@ -1,5 +1,6 @@
 package com.londontubeai.navigator.navigation
 
+import android.net.Uri
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsSubway
 import androidx.compose.material.icons.filled.Explore
@@ -32,8 +33,20 @@ sealed class Screen(
         selectedIcon = Icons.Filled.Explore,
         unselectedIcon = Icons.Outlined.Explore,
     ) {
-        fun createRoute(toId: String? = null): String =
-            if (!toId.isNullOrBlank()) "route?toId=$toId" else route
+        fun createRoute(
+            toId: String? = null,
+            toName: String? = null,
+            toLat: Double? = null,
+            toLng: Double? = null,
+        ): String {
+            val params = buildList {
+                if (!toId.isNullOrBlank()) add("toId=${Uri.encode(toId)}")
+                if (!toName.isNullOrBlank()) add("toName=${Uri.encode(toName)}")
+                if (toLat != null) add("toLat=$toLat")
+                if (toLng != null) add("toLng=$toLng")
+            }
+            return if (params.isEmpty()) route else "$route?${params.joinToString("&")}" 
+        }
     }
 
     data object Status : Screen(

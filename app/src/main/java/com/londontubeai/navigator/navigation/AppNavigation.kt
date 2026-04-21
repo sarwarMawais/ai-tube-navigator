@@ -140,8 +140,8 @@ fun AppNavigation(
 
                 composable(Screen.Home.route) {
                     HomeScreen(
-                        onNavigateToRoute = {
-                            navController.navigate(Screen.Route.route) {
+                        onNavigateToRoute = { toId, toName, toLat, toLng ->
+                            navController.navigate(Screen.Route.createRoute(toId, toName, toLat, toLng)) {
                                 popUpTo(Screen.Home.route) { saveState = true }
                                 launchSingleTop = true
                                 restoreState = true
@@ -171,9 +171,24 @@ fun AppNavigation(
                 }
 
                 composable(
-                    route = "route?toId={toId}",
+                    route = "route?toId={toId}&toName={toName}&toLat={toLat}&toLng={toLng}",
                     arguments = listOf(
                         navArgument("toId") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        },
+                        navArgument("toName") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        },
+                        navArgument("toLat") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        },
+                        navArgument("toLng") {
                             type = NavType.StringType
                             nullable = true
                             defaultValue = null
@@ -181,8 +196,14 @@ fun AppNavigation(
                     ),
                 ) { backStackEntry ->
                     val initialToId = backStackEntry.arguments?.getString("toId")
+                    val initialToName = backStackEntry.arguments?.getString("toName")
+                    val initialToLat = backStackEntry.arguments?.getString("toLat")?.toDoubleOrNull()
+                    val initialToLng = backStackEntry.arguments?.getString("toLng")?.toDoubleOrNull()
                     RouteScreen(
                         initialToStationId = initialToId,
+                        initialToPlaceName = initialToName,
+                        initialToPlaceLat = initialToLat,
+                        initialToPlaceLng = initialToLng,
                         onNavigateToMap = { fromId, toId ->
                             navController.navigate(Screen.TubeMap.createRoute(fromId, toId))
                         },
@@ -236,17 +257,14 @@ fun AppNavigation(
                     )
                 }
 
-                composable(Screen.Licenses.route) {
-                    LicensesScreen(
-                        onBack = { navController.popBackStack() },
-                    )
-                }
-
                 composable(Screen.NearbyDetail.route) {
                     NearbyDetailScreen(
                         onBack = { navController.popBackStack() },
                         onStationClick = { stationId ->
                             navController.navigate(Screen.StationDetail.createRoute(stationId))
+                        },
+                        onNavigateToRoute = { toId, toName, toLat, toLng ->
+                            navController.navigate(Screen.Route.createRoute(toId, toName, toLat, toLng))
                         },
                     )
                 }
@@ -273,8 +291,8 @@ fun AppNavigation(
                         onStationClick = { stationId ->
                             navController.navigate(Screen.StationDetail.createRoute(stationId))
                         },
-                        onNavigateToRoute = { stationId ->
-                            navController.navigate(Screen.Route.createRoute(stationId))
+                        onNavigateToRoute = { destinationId, destinationName, destinationLat, destinationLng ->
+                            navController.navigate(Screen.Route.createRoute(destinationId, destinationName, destinationLat, destinationLng))
                         },
                         routeFromId = fromId,
                         routeToId = toId,

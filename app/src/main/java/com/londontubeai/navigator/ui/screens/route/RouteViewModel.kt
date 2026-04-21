@@ -6,9 +6,11 @@ import com.londontubeai.navigator.data.local.entity.SavedJourneyEntity
 import com.londontubeai.navigator.data.model.CarriageRecommendation
 import com.londontubeai.navigator.data.model.CrowdPrediction
 import com.londontubeai.navigator.data.model.JourneyRoute
+import com.londontubeai.navigator.data.model.LineStatus
 import com.londontubeai.navigator.data.model.Station
 import com.londontubeai.navigator.data.model.TubeData
 import com.londontubeai.navigator.data.billing.BillingManager
+import com.londontubeai.navigator.data.notifications.JourneyReminderScheduler
 import com.londontubeai.navigator.data.preferences.AppPreferences
 import com.londontubeai.navigator.data.repository.TubeRepository
 import com.londontubeai.navigator.ml.CrowdPredictionEngine
@@ -102,6 +104,14 @@ data class RouteUiState(
     val isResolvingLocation: Boolean = false,
     val nearbyBusRoutes: List<NearbyBusRoute> = emptyList(),
     val isFetchingBuses: Boolean = false,
+    // Live TfL line statuses — used to surface per-leg disruption warnings
+    // inside the step-by-step timeline. Empty = unknown / offline.
+    val lineStatuses: List<LineStatus> = emptyList(),
+    // Timestamp of last successful route plan — shown as "Updated Xm ago"
+    // and used by the auto-refresh loop for LEAVE_NOW journeys.
+    val lastPlannedEpochMs: Long = 0L,
+    // True while an explicit user-triggered refresh is in flight.
+    val isRefreshing: Boolean = false,
 )
 
 @HiltViewModel
@@ -110,6 +120,7 @@ class RouteViewModel @Inject constructor(
     private val prefs: AppPreferences,
     private val locationService: LocationService,
     val reviewManager: AppReviewManager,
+    private val reminderScheduler: JourneyReminderScheduler,
     private val billingManager: BillingManager,
 ) : ViewModel() {
 
@@ -127,6 +138,88 @@ class RouteViewModel @Inject constructor(
     init {
         checkLocation()
         applyPreferencesDefaults()
+        observeLineStatuses()
+        startLeaveNowAutoRefresh()
+    }
+
+    /**
+     * Streams cached line statuses from the repository so the Route screen
+     * can inline-warn users about disruptions on the tube lines they're about
+     * to take. Falls back silently when offline / cache is empty.
+     */
+    private fun observeLineStatuses() {
+        viewModelScope.launch {
+            // Map cached DB entities into the domain LineStatus used by the UI.
+            repository.getCachedLineStatuses().collect { cached ->
+                val mapped = cached.map { entity ->
+                    val color = TubeData.getLineById(entity.lineId)?.color
+                        ?: androidx.compose.ui.graphics.Color.Gray
+                    LineStatus(
+                        lineId = entity.lineId,
+                        lineName = entity.lineName,
+                        lineColor = color,
+                        statusSeverity = entity.statusSeverity,
+                        statusDescription = entity.statusDescription,
+                        reason = entity.reason,
+                        isGoodService = entity.statusSeverity >= 10,
+                    )
+                }
+                _uiState.value = _uiState.value.copy(lineStatuses = mapped)
+            }
+        }
+    }
+
+    /**
+     * Auto-refreshes the plan every 5 minutes while the user has LEAVE_NOW
+     * selected — keeps "Leave in Xm" and scheduled arrival times fresh.
+     */
+    private fun startLeaveNowAutoRefresh() {
+        viewModelScope.launch {
+            while (true) {
+                delay(5 * 60_000L)
+                val s = _uiState.value
+                if (s.departureOption == DepartureOption.LEAVE_NOW &&
+                    s.toStation != null &&
+                    !s.isCalculating
+                ) {
+                    tryCalculateRoute()
+                }
+            }
+        }
+    }
+
+    /**
+     * User-triggered refresh. Re-runs the route planner immediately.
+     */
+    fun refresh() {
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
+        tryCalculateRoute()
+    }
+
+    /**
+     * Shifts the planned departure time by the given number of minutes and
+     * re-plans. Used by the "Earlier / Later" quick-shift buttons beneath
+     * the route options list. Switches to DEPART_AT so subsequent changes
+     * are reflected correctly.
+     */
+    fun shiftDepartureTime(deltaMinutes: Int) {
+        val s = _uiState.value
+        val cal = Calendar.getInstance().apply {
+            if (s.departureOption == DepartureOption.LEAVE_NOW) {
+                // anchor from now
+            } else {
+                set(Calendar.HOUR_OF_DAY, s.currentHour)
+                set(Calendar.MINUTE, s.currentMinute)
+            }
+            add(Calendar.MINUTE, deltaMinutes)
+        }
+        _uiState.value = s.copy(
+            departureOption = DepartureOption.DEPART_AT,
+            currentHour = cal.get(Calendar.HOUR_OF_DAY),
+            currentMinute = cal.get(Calendar.MINUTE),
+            showDepartureOptions = false,
+        )
+        tryCalculateRoute()
     }
 
     private fun applyPreferencesDefaults() {
@@ -242,6 +335,7 @@ class RouteViewModel @Inject constructor(
     // Debouncing jobs for search
     private var fromSearchJob: Job? = null
     private var toSearchJob: Job? = null
+    private var routeCalcJob: Job? = null
     private val SEARCH_DEBOUNCE_MS = 300L
 
     fun updateFromQuery(query: String) {
@@ -255,6 +349,7 @@ class RouteViewModel @Inject constructor(
             fromStation = if (query.isBlank()) null else _uiState.value.fromStation,
             fromIsAutoLocation = false,
             routeCalculated = false,
+            routeError = null,
         )
         
         // Debounce search suggestions
@@ -284,6 +379,7 @@ class RouteViewModel @Inject constructor(
             isSearchingTo = query.length >= 2,
             toStation = if (query.isBlank()) null else _uiState.value.toStation,
             routeCalculated = false,
+            routeError = null,
         )
         
         // Debounce search suggestions
@@ -333,6 +429,22 @@ class RouteViewModel @Inject constructor(
         selectToStation(station)
     }
 
+    fun preSelectToPlace(name: String, latitude: Double, longitude: Double) {
+        val placeId = "place:${String.format(Locale.US, "%.5f", latitude)},${String.format(Locale.US, "%.5f", longitude)}"
+        val current = _uiState.value.toStation
+        if (current?.id == placeId) return
+        selectToStation(
+            Station(
+                id = placeId,
+                name = name,
+                lineIds = emptyList(),
+                zone = "",
+                latitude = latitude,
+                longitude = longitude,
+            )
+        )
+    }
+
     fun setFromFieldFocused(focused: Boolean) {
         _uiState.value = _uiState.value.copy(fromFieldFocused = focused)
     }
@@ -380,37 +492,25 @@ class RouteViewModel @Inject constructor(
 
     fun selectPreference(preference: RoutePreference) {
         _uiState.value = _uiState.value.copy(selectedPreference = preference)
-        val options = _uiState.value.routeOptions
-        // Step-free requires a new TfL API call with accessibilityPreference param
-        if (options.isEmpty() || preference == RoutePreference.STEP_FREE) {
-            tryCalculateRoute()
-            return
-        }
-        // Snap to matching option without full recalculation for other preferences
-        val targetLabel = when (preference) {
-            RoutePreference.FASTEST -> "Fastest"
-            RoutePreference.FEWEST_CHANGES -> "Fewer changes"
-            RoutePreference.LEAST_WALKING -> "Less walking"
-            RoutePreference.STEP_FREE -> null
-        }
-        val idx = targetLabel
-            ?.let { lbl -> options.indexOfFirst { it.label == lbl } }
-            ?.takeIf { it >= 0 } ?: 0
-        selectRouteOption(idx)
+        tryCalculateRoute()
     }
+
+    fun recalculate() = tryCalculateRoute()
 
     fun selectRouteOption(index: Int) {
         val options = _uiState.value.routeOptions
         if (index !in options.indices) return
         val selected = options[index]
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val state = _uiState.value
         val dayType = _uiState.value.selectedCrowdDayType
         repository.cacheRoute(selected.route)
+        val crowdStation = resolveCrowdStationId(state, selected.route) ?: selected.route.toStation.id
+        val crowdHour = resolveCrowdHour(state, selected.route.totalDurationMinutes)
         _uiState.value = _uiState.value.copy(
             selectedRouteIndex = index,
             journeyRoute = selected.route,
             carriageRecommendation = selected.route.carriageRecommendation,
-            crowdPrediction = repository.predictCrowding(selected.route.fromStation.id, hour, dayType),
+            crowdPrediction = repository.predictCrowding(crowdStation, crowdHour, dayType),
             estimatedMinutes = selected.route.totalDurationMinutes,
         )
     }
@@ -439,8 +539,8 @@ class RouteViewModel @Inject constructor(
 
     fun selectCrowdDayType(dayType: CrowdPredictionEngine.DayType) {
         val state = _uiState.value
-        val targetStationId = state.journeyRoute?.fromStation?.id ?: state.toStation?.id
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val targetStationId = resolveCrowdStationId(state)
+        val hour = resolveCrowdHour(state)
         _uiState.value = state.copy(
             selectedCrowdDayType = dayType,
             crowdPrediction = targetStationId?.let { repository.predictCrowding(it, hour, dayType) },
@@ -448,32 +548,63 @@ class RouteViewModel @Inject constructor(
     }
 
     fun toggleFavorite() {
-        val newFav = !_uiState.value.isFavorite
-        _uiState.value = _uiState.value.copy(isFavorite = newFav)
-        val journeyId = _uiState.value.savedJourneyId ?: return
         viewModelScope.launch {
+            val state = _uiState.value
+            val route = state.journeyRoute ?: return@launch
+            val origin = persistableOrigin(state, route)
+            val destination = state.toStation ?: route.toStation
+            val journeyId = state.savedJourneyId ?: repository.saveJourney(origin, destination)
+            val newFav = !state.isFavorite
             val journey = SavedJourneyEntity(
                 id = journeyId,
-                fromStationId = _uiState.value.fromStation?.id ?: "",
-                fromStationName = _uiState.value.fromStation?.name ?: "",
-                toStationId = _uiState.value.toStation?.id ?: "",
-                toStationName = _uiState.value.toStation?.name ?: "",
+                fromStationId = origin.id,
+                fromStationName = origin.name,
+                toStationId = destination.id,
+                toStationName = destination.name,
+                fromLat = origin.latitude,
+                fromLng = origin.longitude,
+                toLat = destination.latitude,
+                toLng = destination.longitude,
                 isFavourite = newFav,
             )
             repository.toggleFavourite(journey)
+            _uiState.value = _uiState.value.copy(
+                isFavorite = newFav,
+                savedJourneyId = journeyId,
+            )
         }
     }
 
-    fun setReminder() {
-        _uiState.value = _uiState.value.copy(reminderSet = true)
+    fun setReminder(): String {
+        val state = _uiState.value
+        val route = state.journeyRoute ?: return "Calculate a route first"
+        if (state.departureOption == DepartureOption.LEAVE_NOW) {
+            return "Choose Depart At or Arrive By to set a reminder"
+        }
+        val triggerAtMillis = resolveReminderTriggerAt(state, route.totalDurationMinutes)
+            ?: return "That reminder time has already passed"
+        val departureCal = Calendar.getInstance().apply { timeInMillis = triggerAtMillis }
+        val departureLabel = "%02d:%02d".format(
+            departureCal.get(Calendar.HOUR_OF_DAY),
+            departureCal.get(Calendar.MINUTE),
+        )
+        val scheduled = reminderScheduler.scheduleReminder(
+            workName = "route-reminder-${route.fromStation.id}-${route.toStation.id}",
+            triggerAtMillis = triggerAtMillis,
+            title = "Time to leave · ${route.fromStation.name} → ${route.toStation.name}",
+            message = "Planned departure at $departureLabel · journey takes about ${route.totalDurationMinutes} min",
+        )
+        if (!scheduled) return "Could not schedule reminder"
+        _uiState.value = state.copy(reminderSet = true)
+        return "Reminder scheduled for $departureLabel"
     }
 
     fun getShareText(): String {
         val state = _uiState.value
-        val from = state.fromStation?.name ?: "Unknown"
-        val to = state.toStation?.name ?: "Unknown"
         val mins = state.estimatedMinutes ?: 0
         val route = state.journeyRoute
+        val from = state.fromStation?.name ?: route?.fromStation?.name ?: "Unknown"
+        val to = state.toStation?.name ?: route?.toStation?.name ?: "Unknown"
         val changes = route?.totalInterchanges ?: 0
         val legs = route?.legs?.joinToString(" → ") { it.line.name } ?: ""
         return "🚇 AI Tube Navigator\n$from → $to\n⏱ $mins min · $changes change${if (changes != 1) "s" else ""}\nVia: $legs\nPlan your journey: https://aitube.navigator"
@@ -523,17 +654,38 @@ class RouteViewModel @Inject constructor(
 
         // Need either explicit from-station OR GPS coordinates
         if (!useCoords && from == null) return
-        if (!useCoords && from != null && from.id == to.id) return
+        if (!useCoords && from != null && from.id == to.id) {
+            _uiState.value = _uiState.value.copy(
+                routeError = "Start and destination are the same station. Please choose different stations.",
+                isCalculating = false,
+                isRefreshing = false,
+            )
+            return
+        }
+        // Also catch GPS origin that's essentially on top of the destination (≤ 120m)
+        if (useCoords && !to.id.startsWith("place:") && lat != null && lng != null) {
+            val distToDest = locationService.calculateDistance(lat, lng, to.latitude, to.longitude)
+            if (distToDest < 0.12) {
+                _uiState.value = _uiState.value.copy(
+                    routeError = "You're already at ${to.name}. Pick a different destination.",
+                    isCalculating = false,
+                    isRefreshing = false,
+                )
+                return
+            }
+        }
 
-        viewModelScope.launch {
+        routeCalcJob?.cancel()
+        routeCalcJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isCalculating = true,
                 routeError = null,
                 routeOptions = emptyList(),
             )
 
-            val journeyId = from?.let { repository.saveJourney(it, to) }
-            val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+            // Persist the journey once we actually have a route — avoids polluting recents with
+            // abandoned searches where no valid route exists.
+            var savedJourneyId: Long? = null
             val selectedCrowdDayType = _uiState.value.selectedCrowdDayType
 
             // Build TfL date/time/timeIs params from selected departure option
@@ -595,18 +747,23 @@ class RouteViewModel @Inject constructor(
             // Fallback to local Dijkstra if TfL returned nothing
             if (allRoutes.isEmpty()) {
                 val fallback = when {
-                    useCoords -> buildLocalRouteWithWalking(lat!!, lng!!, to, "FASTEST")
-                    fromIsPlace -> buildLocalRouteWithWalking(from!!.latitude, from.longitude, to, "FASTEST")
-                    toIsPlace && from != null -> buildLocalRouteEndingAtCoords(from, to.latitude, to.longitude, to.name, "FASTEST")
-                    from != null -> repository.findRoute(from.id, to.id, "FASTEST")
+                    useCoords -> buildLocalRouteWithWalking(lat!!, lng!!, to, tflPref)
+                    fromIsPlace -> buildLocalRouteWithWalking(from!!.latitude, from.longitude, to, tflPref)
+                    toIsPlace && from != null -> buildLocalRouteEndingAtCoords(from, to.latitude, to.longitude, to.name, tflPref)
+                    from != null -> repository.findRoute(from.id, to.id, tflPref)
                     else -> null
                 }
                 fallback?.let { allRoutes.add(it) }
             }
 
-            // Deduplicate by duration + interchanges, label them, sort by time
+            // Deduplicate by duration + interchanges + line signature so two structurally
+            // different routes with the same stats (e.g. Circle vs District on same corridor)
+            // remain distinct options for the user.
             val uniqueRoutes = allRoutes
-                .distinctBy { "${it.totalDurationMinutes}-${it.totalInterchanges}-${it.legs.size}" }
+                .distinctBy { r ->
+                    val sig = r.legs.joinToString("|") { leg -> "${leg.mode}:${leg.line.id}:${leg.fromStation.id}->${leg.toStation.id}" }
+                    "${r.totalDurationMinutes}-${r.totalInterchanges}-${r.totalWalkingMinutes}-$sig"
+                }
                 .sortedBy { it.totalDurationMinutes }
                 .take(5)
 
@@ -626,32 +783,114 @@ class RouteViewModel @Inject constructor(
                 )
             }
 
-            val crowdStationId = from?.id ?: to.id
+            // Use the real boarding station for crowd prediction:
+            // when from=GPS the first real tube station is the nearest tube stop.
+            val crowdStationId = resolveCrowdStationId(state, uniqueRoutes.firstOrNull()) ?: to.id
             if (options.isNotEmpty()) {
                 val primary = options.first()
+                if (savedJourneyId == null) {
+                    savedJourneyId = repository.saveJourney(
+                        persistableOrigin(state, primary.route),
+                        state.toStation ?: primary.route.toStation,
+                    )
+                }
+                val crowdHour = resolveCrowdHour(state, primary.route.totalDurationMinutes)
                 repository.cacheRoute(primary.route)
                 _uiState.value = _uiState.value.copy(
                     routeOptions = options,
                     selectedRouteIndex = 0,
                     journeyRoute = primary.route,
                     carriageRecommendation = primary.route.carriageRecommendation,
-                    crowdPrediction = repository.predictCrowding(crowdStationId, hour, selectedCrowdDayType),
+                    crowdPrediction = repository.predictCrowding(crowdStationId, crowdHour, selectedCrowdDayType),
                     routeCalculated = true,
                     estimatedMinutes = primary.route.totalDurationMinutes,
                     isCalculating = false,
-                    savedJourneyId = journeyId,
+                    isRefreshing = false,
+                    lastPlannedEpochMs = System.currentTimeMillis(),
+                    savedJourneyId = savedJourneyId,
                     isFavorite = false,
                     reminderSet = false,
                 )
             } else {
+                val crowdHour = resolveCrowdHour(state)
                 _uiState.value = _uiState.value.copy(
                     carriageRecommendation = repository.getBestExitForStation(to),
-                    crowdPrediction = repository.predictCrowding(to.id, hour, selectedCrowdDayType),
+                    crowdPrediction = repository.predictCrowding(to.id, crowdHour, selectedCrowdDayType),
                     routeCalculated = false,
                     isCalculating = false,
+                    isRefreshing = false,
                     routeError = buildRouteError(useCoords, fromIsPlace, state.isInsideLondon, state.nearestStationName, state.nearestStationWalkMinutes, fromLat = if (fromIsPlace) from?.latitude else null, fromLng = if (fromIsPlace) from?.longitude else null),
                 )
             }
+        }
+    }
+
+    private fun resolveCrowdStationId(state: RouteUiState, route: JourneyRoute? = state.journeyRoute): String? {
+        // Prefer the first real TUBE boarding station on the route — that's what 'crowding'
+        // actually refers to for the traveller.
+        route?.legs?.firstOrNull { it.mode == com.londontubeai.navigator.data.model.TransportMode.TUBE }
+            ?.fromStation?.id
+            ?.takeIf { !it.startsWith("my-location") && !it.startsWith("place:") }
+            ?.let { return it }
+
+        val routeFromId = route?.fromStation?.id
+        if (routeFromId != null && !routeFromId.startsWith("my-location") && !routeFromId.startsWith("place:")) {
+            return routeFromId
+        }
+        val stateFromId = state.fromStation?.id
+        if (stateFromId != null && !stateFromId.startsWith("my-location") && !stateFromId.startsWith("place:")) {
+            return stateFromId
+        }
+        // Fall back to the user's nearest station rather than the destination — crowding at the
+        // destination is not what the user is asking about.
+        return state.nearestStationName?.let { name ->
+            TubeData.getAllStationsSorted().firstOrNull { it.name.equals(name, ignoreCase = true) }?.id
+        }
+    }
+
+    private fun resolveCrowdHour(state: RouteUiState, routeDurationMinutes: Int? = state.journeyRoute?.totalDurationMinutes): Int {
+        return when (state.departureOption) {
+            DepartureOption.LEAVE_NOW -> Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+            DepartureOption.DEPART_AT -> state.currentHour
+            DepartureOption.ARRIVE_BY -> {
+                val departureCal = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, state.currentHour)
+                    set(Calendar.MINUTE, state.currentMinute)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                    add(Calendar.MINUTE, -(routeDurationMinutes ?: state.estimatedMinutes ?: 0))
+                }
+                departureCal.get(Calendar.HOUR_OF_DAY)
+            }
+        }
+    }
+
+    private fun resolveReminderTriggerAt(state: RouteUiState, routeDurationMinutes: Int): Long? {
+        val targetCal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, state.currentHour)
+            set(Calendar.MINUTE, state.currentMinute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
+        }
+        if (state.departureOption == DepartureOption.ARRIVE_BY) {
+            targetCal.add(Calendar.MINUTE, -routeDurationMinutes)
+        }
+        return targetCal.timeInMillis.takeIf { it > System.currentTimeMillis() }
+    }
+
+    private fun persistableOrigin(state: RouteUiState, route: JourneyRoute): Station {
+        return if (state.fromIsAutoLocation && state.userLat != null && state.userLng != null) {
+            Station(
+                id = "place:my-location",
+                name = "My Location",
+                lineIds = emptyList(),
+                zone = "",
+                latitude = state.userLat,
+                longitude = state.userLng,
+            )
+        } else {
+            state.fromStation ?: route.fromStation
         }
     }
 
@@ -798,6 +1037,7 @@ class RouteViewModel @Inject constructor(
     fun clearRoute() {
         fromSearchJob?.cancel()
         toSearchJob?.cancel()
+        routeCalcJob?.cancel()
         _uiState.value = RouteUiState(
             isInsideLondon = _uiState.value.isInsideLondon,
             locationChecked = _uiState.value.locationChecked,
@@ -813,5 +1053,6 @@ class RouteViewModel @Inject constructor(
         super.onCleared()
         fromSearchJob?.cancel()
         toSearchJob?.cancel()
+        routeCalcJob?.cancel()
     }
 }

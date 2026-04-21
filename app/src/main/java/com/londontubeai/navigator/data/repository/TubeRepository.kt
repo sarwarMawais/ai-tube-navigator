@@ -13,6 +13,7 @@ import com.londontubeai.navigator.data.model.DisruptionSeverity
 import com.londontubeai.navigator.data.model.InsightType
 import com.londontubeai.navigator.data.model.JourneyLeg
 import com.londontubeai.navigator.data.model.JourneyRoute
+import com.londontubeai.navigator.data.model.RouteSource
 import com.londontubeai.navigator.data.model.TransportMode
 import com.londontubeai.navigator.data.model.TubeLine
 import com.londontubeai.navigator.data.model.LineStatus
@@ -135,6 +136,7 @@ class TubeRepository @Inject constructor(
             // Offline fallback — return cached arrivals (may be stale but better than nothing)
             val cached = dao.getCachedArrivals(stationId)
             if (cached.isNotEmpty()) {
+                val cachedAt = cached.maxOfOrNull { it.cachedAt } ?: System.currentTimeMillis()
                 val arrivals = cached.map { c ->
                     val lineColor = TubeData.getLineById(c.lineId)?.color ?: TubeLineColors.Jubilee
                     LiveArrival(
@@ -144,7 +146,13 @@ class TubeRepository @Inject constructor(
                         expectedArrival = c.expectedArrival,
                     )
                 }
-                StationArrivals(stationId = stationId, stationName = station.name, arrivals = arrivals, isCached = true)
+                StationArrivals(
+                    stationId = stationId,
+                    stationName = station.name,
+                    arrivals = arrivals,
+                    lastUpdated = cachedAt,
+                    isCached = true,
+                )
             } else {
                 throw err
             }
@@ -246,7 +254,7 @@ class TubeRepository @Inject constructor(
         )
 
     suspend fun toggleFavourite(journey: SavedJourneyEntity) =
-        dao.updateJourney(journey.copy(isFavourite = !journey.isFavourite))
+        dao.updateJourney(journey)
 
     suspend fun deleteJourney(id: Long) = dao.deleteJourney(id)
 
@@ -384,6 +392,7 @@ class TubeRepository @Inject constructor(
                 legs = legs,
                 totalDurationMinutes = entity.totalDurationMinutes,
                 totalInterchanges = entity.totalInterchanges,
+                source = RouteSource.CACHE,
             )
         } catch (_: Exception) { null }
     }
@@ -454,31 +463,12 @@ class TubeRepository @Inject constructor(
         departureDate: String? = null,
         departureTime: String? = null,
         timeIs: String? = null,
-    ): Result<JourneyRoute> = runCatching {
-        val resolved = resolveJourneyParams(fromStationId, toStationId, fromLat, fromLng, toLat, toLng, toDisplayName)
-        val tflPreference = when (preference.uppercase()) {
-            "FEWEST_CHANGES" -> "leastinterchange"
-            "LEAST_WALKING" -> "leastwalking"
-            else -> "leasttime"
-        }
-        val useNationalSearch2 = fromLat != null && fromLng != null && isOutsideLondon(fromLat, fromLng)
-        val journeyResponse = api.planJourney(
-            fromStationId = resolved.fromParam,
-            toStationId = resolved.toParam,
-            mode = "tube,elizabeth-line,dlr,overground,national-rail,bus,walking",
-            preference = tflPreference,
-            nationalSearch = useNationalSearch2,
-            date = departureDate,
-            time = departureTime,
-            timeIs = timeIs,
-        )
-        val selectedJourney = journeyResponse.journeys?.firstOrNull()
-            ?: throw IllegalStateException("No TfL journey legs available")
-        mapTflJourneyToRoute(selectedJourney, resolved.fromStation, resolved.toStation).also {
-            lastRouteFromId = fromStationId
-            lastRouteToId = toStationId
-            lastJourneyRoute = it
-        }
+    ): Result<JourneyRoute> = fetchAllJourneyRoutesFromTfl(
+        fromStationId, toStationId, preference,
+        fromLat, fromLng, toLat, toLng, toDisplayName,
+        departureDate, departureTime, timeIs,
+    ).mapCatching { routes ->
+        routes.firstOrNull() ?: throw IllegalStateException("No TfL journey legs available")
     }
 
     private data class ResolvedJourneyParams(
@@ -627,7 +617,32 @@ class TubeRepository @Inject constructor(
                 } else "",
                 nextDepartureMinutes = 0,
                 platformNumber = platformText,
-                polylinePoints = parseLineString(tflLeg.path?.lineString),
+                polylinePoints = parseLineString(tflLeg.path?.lineString)
+                    .ifEmpty {
+                        // Fallback — TfL sometimes omits lineString (often for bus
+                        // legs). Seed from intermediate stopPoints if present, else
+                        // from the bus stop departure+arrival coords. This guarantees
+                        // the map always renders a visible line for every leg.
+                        val stopCoords = tflLeg.path?.stopPoints
+                            ?.mapNotNull { sp ->
+                                val la = sp.lat; val lo = sp.lon
+                                if (la != null && lo != null && la != 0.0 && lo != 0.0) la to lo else null
+                            }
+                            ?: emptyList()
+                        if (stopCoords.size >= 2) stopCoords
+                        else {
+                            val dLat = tflLeg.departurePoint?.lat ?: from.latitude.takeIf { it != 0.0 }
+                            val dLng = tflLeg.departurePoint?.lon ?: from.longitude.takeIf { it != 0.0 }
+                            val aLat = tflLeg.arrivalPoint?.lat ?: to.latitude.takeIf { it != 0.0 }
+                            val aLng = tflLeg.arrivalPoint?.lon ?: to.longitude.takeIf { it != 0.0 }
+                            if (dLat != null && dLng != null && aLat != null && aLng != null) {
+                                listOf(dLat to dLng, aLat to aLng)
+                            } else emptyList()
+                        }
+                    },
+                scheduledDepartureEpochMs = parseTflDateTimeToEpochMillis(tflLeg.departureTime),
+                scheduledArrivalEpochMs = parseTflDateTimeToEpochMillis(tflLeg.arrivalTime),
+                boardStopNaptanId = tflLeg.departurePoint?.naptanId.orEmpty(),
             )
         }
 
@@ -643,6 +658,19 @@ class TubeRepository @Inject constructor(
         val totalStops = tubeLegs.sumOf { (it.stationIds.size - 1).coerceAtLeast(0) }
         val totalWalkingMinutes = mappedLegs.filter { it.mode == TransportMode.WALKING }.sumOf { it.durationMinutes }
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val estimatedFare = resolveEstimatedFare(selectedJourney, mappedLegs, fromStation, toStation)
+        val peakFare = resolvePeakFare(selectedJourney, mappedLegs, fromStation, toStation, estimatedFare)
+
+        // Prefer the TfL journey's own timestamps; otherwise fall back to the
+        // first leg's scheduled departure and the last leg's scheduled arrival.
+        val scheduledDep = parseTflDateTimeToEpochMillis(selectedJourney.startDateTime)
+            .takeIf { it > 0L }
+            ?: mappedLegs.firstOrNull { it.scheduledDepartureEpochMs > 0L }?.scheduledDepartureEpochMs
+            ?: 0L
+        val scheduledArr = parseTflDateTimeToEpochMillis(selectedJourney.arrivalDateTime)
+            .takeIf { it > 0L }
+            ?: mappedLegs.lastOrNull { it.scheduledArrivalEpochMs > 0L }?.scheduledArrivalEpochMs
+            ?: 0L
 
         return JourneyRoute(
             fromStation = fromStation,
@@ -655,18 +683,35 @@ class TubeRepository @Inject constructor(
             aiTimePredictionMinutes = totalDuration,
             carriageRecommendation = getBestExitForStation(toStation),
             crowdPrediction = predictCrowding(fromStation.id, hour),
-            calorieBurned = (totalDuration * 0.7).toInt(),
-            co2SavedGrams = totalDuration * 14,
-            estimatedFarePounds = selectedJourney.fare?.totalCost?.takeIf { it > 0 }?.let { it / 100.0 }
-                ?: estimateFareFromZones(fromStation, toStation),
-            peakFarePounds = selectedJourney.fare?.fares
-                ?.filter { it.chargeLevel?.contains("off", ignoreCase = true) == false && it.chargeLevel?.contains("peak", ignoreCase = true) == true }
-                ?.mapNotNull { it.cost }
-                ?.maxOrNull()
-                ?.takeIf { it > 0 }?.let { it / 100.0 }
-                ?: estimatePeakFareFromZones(fromStation, toStation),
+            calorieBurned = (totalWalkingMinutes * 4.0).toInt(),
+            co2SavedGrams = (totalDuration - totalWalkingMinutes).coerceAtLeast(0) * 14,
+            estimatedFarePounds = estimatedFare,
+            peakFarePounds = peakFare,
             isStepFreeRoute = isStepFree,
+            source = RouteSource.TFL_API,
+            scheduledDepartureEpochMs = scheduledDep,
+            scheduledArrivalEpochMs = scheduledArr,
         )
+    }
+
+    /**
+     * Parses a TfL journey-planner date-time string like "2025-04-20T21:06:00"
+     * (no timezone — assumed to be London local time) into epoch milliseconds
+     * using the default JVM timezone. Returns 0L if parsing fails.
+     */
+    private fun parseTflDateTimeToEpochMillis(raw: String?): Long {
+        if (raw.isNullOrBlank()) return 0L
+        return try {
+            // TfL returns no timezone suffix — treat as device-local.
+            val normalized = raw.removeSuffix("Z")
+            java.time.LocalDateTime
+                .parse(normalized)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        } catch (t: Throwable) {
+            0L
+        }
     }
 
     // ── Graph-Based Route Finding (BFS / Dijkstra) ──────────
@@ -850,76 +895,175 @@ class TubeRepository @Inject constructor(
             co2SavedGrams = co2Saved,
             estimatedFarePounds = estimateFareFromZones(fromStation, toStation),
             peakFarePounds = estimatePeakFareFromZones(fromStation, toStation),
+            source = RouteSource.LOCAL_DIJKSTRA,
         )
     }
 
     /**
      * Zone-based Oyster/contactless fare estimate using 2025/26 TfL off-peak single fares.
+     * For multi-zone stations (e.g. "1/2") we iterate ALL zone combinations and pick the
+     * cheapest valid fare — matching how TfL PAYG actually charges.
      * Used as fallback when TfL API doesn't return fare data.
      */
     private fun estimateFareFromZones(from: Station, to: Station): Double? {
-        val fromZone = from.zone.split("/").mapNotNull { it.trim().toIntOrNull() }.minOrNull() ?: return null
-        val toZone = to.zone.split("/").mapNotNull { it.trim().toIntOrNull() }.minOrNull() ?: return null
-        val lo = minOf(fromZone, toZone)
-        val hi = maxOf(fromZone, toZone)
+        val fromZones = parseZones(from.zone).ifEmpty { return null }
+        val toZones = parseZones(to.zone).ifEmpty { return null }
+        return cheapestZonalFare(fromZones, toZones, peak = false)
+    }
+
+    private fun parseZones(raw: String): List<Int> =
+        raw.split("/", ",").mapNotNull { it.trim().toIntOrNull() }.distinct()
+
+    private fun cheapestZonalFare(fromZones: List<Int>, toZones: List<Int>, peak: Boolean): Double? {
+        var best: Double? = null
+        for (fz in fromZones) {
+            for (tz in toZones) {
+                val lo = minOf(fz, tz)
+                val hi = maxOf(fz, tz)
+                val fare = if (peak) peakFareTable(lo, hi) else offPeakFareTable(lo, hi)
+                if (fare != null && (best == null || fare < best)) best = fare
+            }
+        }
+        return best
+    }
+
+    private fun offPeakFareTable(lo: Int, hi: Int): Double? = when {
+        lo == 1 && hi == 1 -> 2.80
+        lo == 1 && hi == 2 -> 3.40
+        lo == 1 && hi == 3 -> 3.70
+        lo == 1 && hi == 4 -> 4.30
+        lo == 1 && hi == 5 -> 5.25
+        lo == 1 && hi == 6 -> 5.70
+        lo == 2 && hi == 2 -> 1.80
+        lo == 2 && hi == 3 -> 2.00
+        lo == 2 && hi == 4 -> 2.60
+        lo == 2 && hi == 5 -> 3.10
+        lo == 2 && hi == 6 -> 3.60
+        lo == 3 && hi == 3 -> 1.80
+        lo == 3 && hi == 4 -> 2.00
+        lo == 3 && hi == 5 -> 2.60
+        lo == 3 && hi == 6 -> 3.00
+        lo == 4 && hi == 4 -> 1.80
+        lo == 4 && hi == 5 -> 2.00
+        lo == 4 && hi == 6 -> 2.50
+        lo == 5 && hi == 5 -> 1.80
+        lo == 5 && hi == 6 -> 2.00
+        lo == 6 && hi == 6 -> 1.80
+        else -> null
+    }
+
+    private fun peakFareTable(lo: Int, hi: Int): Double? = when {
+        lo == 1 && hi == 1 -> 3.40
+        lo == 1 && hi == 2 -> 3.80
+        lo == 1 && hi == 3 -> 4.30
+        lo == 1 && hi == 4 -> 5.10
+        lo == 1 && hi == 5 -> 5.55
+        lo == 1 && hi == 6 -> 6.10
+        lo == 2 && hi == 2 -> 2.80
+        lo == 2 && hi == 3 -> 2.80
+        lo == 2 && hi == 4 -> 2.80
+        lo == 2 && hi == 5 -> 3.30
+        lo == 2 && hi == 6 -> 3.80
+        lo == 3 && hi == 3 -> 2.00
+        lo == 3 && hi == 4 -> 2.20
+        lo == 3 && hi == 5 -> 2.80
+        lo == 3 && hi == 6 -> 3.20
+        lo == 4 && hi == 4 -> 2.00
+        lo == 4 && hi == 5 -> 2.20
+        lo == 4 && hi == 6 -> 2.70
+        lo == 5 && hi == 5 -> 2.00
+        lo == 5 && hi == 6 -> 2.20
+        lo == 6 && hi == 6 -> 2.00
+        else -> null
+    }
+
+    private fun resolveEstimatedFare(
+        selectedJourney: com.londontubeai.navigator.data.remote.TflJourney,
+        mappedLegs: List<JourneyLeg>,
+        fromStation: Station,
+        toStation: Station,
+    ): Double? {
+        val detailedFares = selectedJourney.fare?.fares.orEmpty()
+        val explicitTotal = selectedJourney.fare?.totalCost
+            ?.takeIf { it > 0 }
+            ?.let { it / 100.0 }
+        val lowestDetailedFare = detailedFares
+            .mapNotNull { fare -> fare.cost }
+            .filter { it > 0 }
+            .minOrNull()
+            ?.let { it / 100.0 }
+        val hasBusLeg = mappedLegs.any { leg -> leg.mode == TransportMode.BUS }
+        val hasRailLeg = mappedLegs.any { leg -> leg.mode == TransportMode.TUBE }
         return when {
-            lo == 1 && hi == 1 -> 2.80
-            lo == 1 && hi == 2 -> 3.40
-            lo == 1 && hi == 3 -> 3.70
-            lo == 1 && hi == 4 -> 4.30
-            lo == 1 && hi == 5 -> 5.25
-            lo == 1 && hi == 6 -> 5.70
-            lo == 2 && hi == 2 -> 1.80
-            lo == 2 && hi == 3 -> 2.00
-            lo == 2 && hi == 4 -> 2.60
-            lo == 2 && hi == 5 -> 3.10
-            lo == 2 && hi == 6 -> 3.60
-            lo == 3 && hi == 3 -> 1.80
-            lo == 3 && hi == 4 -> 2.00
-            lo == 3 && hi == 5 -> 2.60
-            lo == 3 && hi == 6 -> 3.00
-            lo == 4 && hi == 4 -> 1.80
-            lo == 4 && hi == 5 -> 2.00
-            lo == 4 && hi == 6 -> 2.50
-            lo == 5 && hi == 5 -> 1.80
-            lo == 5 && hi == 6 -> 2.00
-            lo == 6 && hi == 6 -> 1.80
+            explicitTotal != null -> explicitTotal
+            hasBusLeg && !hasRailLeg -> BUS_HOPPER_FARE_POUNDS
+            lowestDetailedFare != null -> lowestDetailedFare
+            else -> estimateFallbackFare(mappedLegs, fromStation, toStation, peak = false)
+        }
+    }
+
+    private fun resolvePeakFare(
+        selectedJourney: com.londontubeai.navigator.data.remote.TflJourney,
+        mappedLegs: List<JourneyLeg>,
+        fromStation: Station,
+        toStation: Station,
+        estimatedFare: Double?,
+    ): Double? {
+        // TfL returns charge levels like "Peak", "Off Peak", "Anytime", "SingleAnytime".
+        // Treat explicit "Peak" entries as peak; use max value in case multiple are listed.
+        val peakDetailedFare = selectedJourney.fare?.fares
+            .orEmpty()
+            .filter { fare ->
+                val level = fare.chargeLevel?.lowercase()?.trim()
+                level != null && level.contains("peak") && !level.contains("off")
+            }
+            .mapNotNull { fare -> fare.cost }
+            .filter { it > 0 }
+            .maxOrNull()
+            ?.let { it / 100.0 }
+        val hasRailLeg = mappedLegs.any { leg -> leg.mode == TransportMode.TUBE }
+        val hasBusLeg = mappedLegs.any { leg -> leg.mode == TransportMode.BUS }
+        return when {
+            peakDetailedFare != null -> peakDetailedFare
+            hasBusLeg && !hasRailLeg -> BUS_HOPPER_FARE_POUNDS
+            else -> estimateFallbackFare(mappedLegs, fromStation, toStation, peak = true) ?: estimatedFare
+        }
+    }
+
+    private fun estimateFallbackFare(
+        mappedLegs: List<JourneyLeg>,
+        fromStation: Station,
+        toStation: Station,
+        peak: Boolean,
+    ): Double? {
+        val railLegs = mappedLegs.filter { leg -> leg.mode == TransportMode.TUBE }
+        val hasBusLeg = mappedLegs.any { leg -> leg.mode == TransportMode.BUS }
+        val fallbackFrom = railLegs.firstOrNull()?.fromStation ?: fromStation
+        val fallbackTo = railLegs.lastOrNull()?.toStation ?: toStation
+        val zonalFare = if (peak) {
+            estimatePeakFareFromZones(fallbackFrom, fallbackTo)
+        } else {
+            estimateFareFromZones(fallbackFrom, fallbackTo)
+        }
+        return when {
+            zonalFare != null -> zonalFare
+            hasBusLeg -> BUS_HOPPER_FARE_POUNDS
             else -> null
         }
     }
 
     /**
      * Zone-based peak Oyster/contactless fare using 2025/26 TfL peak single fares.
+     * For multi-zone stations we iterate combinations and return the cheapest peak fare.
      */
     private fun estimatePeakFareFromZones(from: Station, to: Station): Double? {
-        val fromZone = from.zone.split("/").mapNotNull { it.trim().toIntOrNull() }.minOrNull() ?: return null
-        val toZone = to.zone.split("/").mapNotNull { it.trim().toIntOrNull() }.minOrNull() ?: return null
-        val lo = minOf(fromZone, toZone)
-        val hi = maxOf(fromZone, toZone)
-        return when {
-            lo == 1 && hi == 1 -> 3.40
-            lo == 1 && hi == 2 -> 3.80
-            lo == 1 && hi == 3 -> 4.30
-            lo == 1 && hi == 4 -> 5.10
-            lo == 1 && hi == 5 -> 5.55
-            lo == 1 && hi == 6 -> 6.10
-            lo == 2 && hi == 2 -> 2.80
-            lo == 2 && hi == 3 -> 2.80
-            lo == 2 && hi == 4 -> 2.80
-            lo == 2 && hi == 5 -> 3.30
-            lo == 2 && hi == 6 -> 3.80
-            lo == 3 && hi == 3 -> 2.00
-            lo == 3 && hi == 4 -> 2.20
-            lo == 3 && hi == 5 -> 2.80
-            lo == 3 && hi == 6 -> 3.20
-            lo == 4 && hi == 4 -> 2.00
-            lo == 4 && hi == 5 -> 2.20
-            lo == 4 && hi == 6 -> 2.70
-            lo == 5 && hi == 5 -> 2.00
-            lo == 5 && hi == 6 -> 2.20
-            lo == 6 && hi == 6 -> 2.00
-            else -> null
-        }
+        val fromZones = parseZones(from.zone).ifEmpty { return null }
+        val toZones = parseZones(to.zone).ifEmpty { return null }
+        return cheapestZonalFare(fromZones, toZones, peak = true)
+    }
+
+    private companion object {
+        const val BUS_HOPPER_FARE_POUNDS = 1.75
     }
 
     private val stationPlatformData: Map<String, Map<String, String>> = mapOf(
@@ -1077,7 +1221,8 @@ class TubeRepository @Inject constructor(
         }
 
         // Carriage positioning tip
-        val tipStation = listOf("oxford-circus", "bank", "kings-cross", "waterloo", "victoria").random()
+        val tipStations = listOf("oxford-circus", "bank", "kings-cross", "waterloo", "victoria")
+        val tipStation = tipStations[(hour + dayOfWeek) % tipStations.size]
         val station = TubeData.getStationById(tipStation)
         if (station != null) {
             val bestExit = station.exits.minByOrNull { it.walkingTimeSeconds }

@@ -89,9 +89,13 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.londontubeai.navigator.data.model.LineStatus
 import com.londontubeai.navigator.data.model.Station
+import com.londontubeai.navigator.data.model.RouteSource
 import com.londontubeai.navigator.data.model.TransportMode
+import androidx.compose.material.icons.filled.WifiTethering
+import androidx.compose.material.icons.filled.WifiOff
 import com.londontubeai.navigator.data.model.TubeData
 import com.londontubeai.navigator.ui.theme.Spacing
 import com.londontubeai.navigator.ui.theme.horizontalScreenPadding
@@ -129,10 +133,22 @@ data class StationCluster(
     val primaryLineId: String?
 )
 
+private data class LiveTrainMarkerUi(
+    val position: LatLng,
+    val color: Color,
+    val lineId: String,
+    val lineName: String,
+    val isEstimated: Boolean,
+)
+
 private enum class MapStyle(val label: String, val icon: ImageVector, val mapType: MapType) {
     NORMAL("Standard", Icons.Filled.Map, MapType.NORMAL),
     TERRAIN("Terrain", Icons.Filled.Terrain, MapType.TERRAIN),
-    SATELLITE("Satellite", Icons.Filled.DarkMode, MapType.HYBRID),
+    SATELLITE("Satellite", Icons.Filled.DarkMode, MapType.HYBRID);
+
+    companion object {
+        fun fromName(name: String): MapStyle = entries.firstOrNull { it.name == name } ?: NORMAL
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -140,7 +156,7 @@ private enum class MapStyle(val label: String, val icon: ImageVector, val mapTyp
 fun MapScreen(
     onBack: () -> Unit = {},
     onStationClick: (String) -> Unit = {},
-    onNavigateToRoute: (String) -> Unit = {},
+    onNavigateToRoute: (String?, String?, Double?, Double?) -> Unit = { _, _, _, _ -> },
     routeFromId: String? = null,
     routeToId: String? = null,
     viewModel: MapViewModel = hiltViewModel(),
@@ -154,9 +170,20 @@ fun MapScreen(
     val lines = remember { TubeData.lines }
     val connections = remember { TubeData.connections }
 
+    val cameraScope = androidx.compose.runtime.rememberCoroutineScope()
     var selectedStation by remember { mutableStateOf<Station?>(null) }
     var selectedLineFilter by remember { mutableStateOf<String?>(null) }
     var showLineFilters by remember { mutableStateOf(false) }
+    // Phase D filter overlays
+    var showDisruptedOnly by remember { mutableStateOf(false) }
+    var showStepFreeOnly by remember { mutableStateOf(false) }
+    // Follow-mode: camera keeps re-centering on the user's live position.
+    var followMode by remember { mutableStateOf(false) }
+    // Traffic overlay + 3D tilt — controllable from the map-style picker FAB.
+    var trafficEnabled by remember { mutableStateOf(false) }
+    var tilt3dEnabled by remember { mutableStateOf(false) }
+    // Re-centre FAB cycle state: 0 = user, 1 = route bounds, 2 = fit all (user + route).
+    var recenterMode by remember { mutableStateOf(0) }
     var isMapLoading by remember { mutableStateOf(true) }
     var searchQuery by remember { mutableStateOf("") }
     var showSearch by remember { mutableStateOf(false) }
@@ -171,6 +198,26 @@ fun MapScreen(
 
     LaunchedEffect(routeFromId, routeToId) {
         viewModel.loadJourney(routeFromId, routeToId)
+    }
+
+    LaunchedEffect(uiState.mapStyleName) {
+        mapStyle = MapStyle.fromName(uiState.mapStyleName)
+    }
+
+    LaunchedEffect(uiState.selectedLineFilter) {
+        selectedLineFilter = uiState.selectedLineFilter
+    }
+
+    LaunchedEffect(uiState.selectedStationId, uiState.journeyRoute) {
+        if (uiState.journeyRoute != null) {
+            selectedStation = null
+            longPressLatLng = null
+            showSearch = false
+            searchQuery = ""
+            showMapStylePicker = false
+        } else {
+            selectedStation = uiState.selectedStationId?.let { TubeData.getStationById(it) }
+        }
     }
 
     LaunchedEffect(uiState.journeyRoute?.fromStation?.id, uiState.journeyRoute?.toStation?.id) {
@@ -204,26 +251,77 @@ fun MapScreen(
         }
     }
 
-    // Search results
-    val searchResults = remember(searchQuery) {
-        if (searchQuery.isBlank()) emptyList()
-        else stations.filter { it.name.contains(searchQuery.trim(), ignoreCase = true) }.take(6)
+    // 3D-tilt toggle — animate camera to a slanted 55° view (or back to top-down 0°)
+    // whenever the user flips the tilt FAB. `tilt3dInitialized` guards against
+    // animating the camera on initial composition before the user has tapped.
+    var tilt3dInitialized by remember { mutableStateOf(false) }
+    LaunchedEffect(tilt3dEnabled) {
+        if (!tilt3dInitialized) { tilt3dInitialized = true; return@LaunchedEffect }
+        try {
+            val cur = cameraPositionState.position
+            cameraPositionState.animate(
+                CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder()
+                        .target(cur.target)
+                        .zoom(if (tilt3dEnabled) maxOf(cur.zoom, 16f) else cur.zoom)
+                        .tilt(if (tilt3dEnabled) 55f else 0f)
+                        .bearing(cur.bearing)
+                        .build()
+                ),
+                700,
+            )
+        } catch (_: Exception) { /* camera ops can throw during gestures */ }
     }
 
-    // Filter stations by selected line
-    val filteredStations = remember(selectedLineFilter) {
-        if (selectedLineFilter == null) stations
+    // Follow-mode: animate the camera each time the user moves and a route isn't active.
+    LaunchedEffect(followMode, uiState.userLat, uiState.userLng) {
+        if (followMode && uiState.userLat != null && uiState.userLng != null && uiState.journeyRoute == null) {
+            try {
+                cameraPositionState.animate(
+                    CameraUpdateFactory.newLatLngZoom(
+                        LatLng(uiState.userLat!!, uiState.userLng!!),
+                        16f,
+                    ),
+                    600,
+                )
+            } catch (_: Exception) {
+                // ignore — camera ops can throw during rapid gesture interruptions
+            }
+        }
+    }
+
+    val searchResults = uiState.searchResults
+    val recentPlaces = uiState.recentPlaces.take(6)
+
+    // Filter stations by selected line + optional step-free overlay.
+    val filteredStations = remember(selectedLineFilter, showStepFreeOnly) {
+        val base = if (selectedLineFilter == null) stations
         else stations.filter { it.lineIds.contains(selectedLineFilter) }
+        if (showStepFreeOnly) base.filter { it.hasStepFreeAccess } else base
     }
 
-    // Filter connections by selected line
-    val filteredConnections = remember(selectedLineFilter) {
-        if (selectedLineFilter == null) connections
+    // Filter connections by selected line + optional "disrupted only" overlay.
+    val disruptedLineIds = remember(uiState.lineStatuses) {
+        uiState.lineStatuses.filter { !it.isGoodService }.map { it.lineId }.toSet()
+    }
+    val filteredConnections = remember(selectedLineFilter, showDisruptedOnly, disruptedLineIds) {
+        val base = if (selectedLineFilter == null) connections
         else connections.filter { it.lineId == selectedLineFilter }
+        if (showDisruptedOnly) base.filter { it.lineId in disruptedLineIds } else base
     }
 
-    // Bitmap cache — avoids recreating hundreds of bitmaps on every recomposition
-    val bitmapCache = remember { HashMap<String, com.google.android.gms.maps.model.BitmapDescriptor>() }
+    // Bitmap cache — avoids recreating hundreds of bitmaps on every recomposition. Capped via
+    // LinkedHashMap in access order so the least-recently-used entries are evicted once the
+    // map exceeds MAX_BITMAP_CACHE.
+    val bitmapCache = remember {
+        object : java.util.LinkedHashMap<String, com.google.android.gms.maps.model.BitmapDescriptor>(
+            128, 0.75f, true,
+        ) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, com.google.android.gms.maps.model.BitmapDescriptor>?,
+            ): Boolean = size > 256
+        }
+    }
 
     // Bucket zoom into 1-unit steps so clustering only recalculates at whole-number zoom changes
     val zoomBucket = (cameraPositionState.position.zoom).toInt()
@@ -271,9 +369,92 @@ fun MapScreen(
         label = "pulseAlpha",
     )
 
-    // Per-second clock drives smooth train position interpolation
+    // 3-second tick drives train-position interpolation. Live arrivals refresh every 15s, so
+    // interpolating any faster than 3s is pure CPU churn with no perceivable visual gain.
     var currentTimeMs by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { delay(1000L); currentTimeMs = System.currentTimeMillis() } }
+    LaunchedEffect(Unit) { while (true) { delay(3_000L); currentTimeMs = System.currentTimeMillis() } }
+
+    // ─── Active-route animation state ────────────────────────────────────
+    // Flatten every leg's polyline into one ordered list of LatLng so we can
+    // (a) animate chevron markers flowing along the full journey, and
+    // (b) place a single "you are here" dot based on time-elapsed fraction.
+    val routeFlatPath: List<LatLng> = remember(uiState.journeyRoute) {
+        val route = uiState.journeyRoute ?: return@remember emptyList()
+        buildList {
+            route.legs.forEach { leg ->
+                val pts = when {
+                    leg.polylinePoints.isNotEmpty() ->
+                        leg.polylinePoints.map { (la, lo) -> LatLng(la, lo) }
+                    leg.stationIds.isNotEmpty() ->
+                        leg.stationIds.mapNotNull { sid ->
+                            TubeData.getStationById(sid)?.let { LatLng(it.latitude, it.longitude) }
+                        }
+                    else -> listOf(
+                        LatLng(leg.fromStation.latitude, leg.fromStation.longitude),
+                        LatLng(leg.toStation.latitude, leg.toStation.longitude),
+                    )
+                }.filter { it.latitude != 0.0 && it.longitude != 0.0 }
+                if (pts.isNotEmpty()) {
+                    if (isNotEmpty() && last() == pts.first()) addAll(pts.drop(1)) else addAll(pts)
+                }
+            }
+        }
+    }
+    // Cumulative arc length per vertex — used to sample positions at a 0..1 fraction.
+    val routeCumKm: FloatArray = remember(routeFlatPath) {
+        if (routeFlatPath.size < 2) floatArrayOf(0f)
+        else FloatArray(routeFlatPath.size).also { arr ->
+            var acc = 0f
+            arr[0] = 0f
+            for (i in 1 until routeFlatPath.size) {
+                val a = routeFlatPath[i - 1]; val b = routeFlatPath[i]
+                acc += haversineKm(a.latitude, a.longitude, b.latitude, b.longitude).toFloat()
+                arr[i] = acc
+            }
+        }
+    }
+
+    // 1-second tick for chevron flow + you-are-here progress. Cheap enough.
+    var journeyTickMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(uiState.journeyRoute) {
+        while (uiState.journeyRoute != null) { delay(1_000L); journeyTickMs = System.currentTimeMillis() }
+    }
+
+    // Normalised animation phase for chevrons (0..1 looping every 4s).
+    val chevronPhase = ((journeyTickMs / 4_000f) % 1f + 1f) % 1f
+
+    // Sample chevron positions at regularly spaced fractions along the route.
+    // 8 chevrons feels dense enough without cluttering the map at typical zooms.
+    val chevronMarkers: List<LatLng> = remember(routeFlatPath, routeCumKm, chevronPhase) {
+        if (routeFlatPath.size < 2 || routeCumKm.last() <= 0.01f) emptyList()
+        else {
+            val count = 8
+            (0 until count).map { i ->
+                val frac = (i.toFloat() / count + chevronPhase) % 1f
+                sampleAlongPath(routeFlatPath, routeCumKm, frac)
+            }
+        }
+    }
+
+    // "You are here" progress along the route — driven by the scheduled
+    // departure + arrival epoch on the route. Before departure → at start,
+    // after arrival → at end, otherwise linear fraction.
+    val progressFraction: Float? = remember(uiState.journeyRoute, journeyTickMs) {
+        val r = uiState.journeyRoute ?: return@remember null
+        val dep = r.scheduledDepartureEpochMs.takeIf { it > 0L } ?: return@remember null
+        val arr = r.scheduledArrivalEpochMs.takeIf { it > 0L } ?: return@remember null
+        if (arr <= dep) return@remember null
+        val now = System.currentTimeMillis()
+        when {
+            now <= dep -> 0f
+            now >= arr -> 1f
+            else -> ((now - dep).toFloat() / (arr - dep).toFloat()).coerceIn(0f, 1f)
+        }
+    }
+    val youArePos: LatLng? = remember(routeFlatPath, routeCumKm, progressFraction) {
+        if (progressFraction == null || routeFlatPath.size < 2) null
+        else sampleAlongPath(routeFlatPath, routeCumKm, progressFraction)
+    }
 
     // Live train positions derived from nearby arrivals
     val liveTrains = remember(uiState.nearbyArrivals, uiState.nearbyArrivalsUpdatedAt, currentTimeMs, connections) {
@@ -298,7 +479,15 @@ fun MapScreen(
                         val fraction = (1f - adjustedSecs / segmentSecs).coerceIn(0.04f, 0.96f)
                         val trainLat = otherStation.latitude + fraction * (destStation.latitude - otherStation.latitude)
                         val trainLng = otherStation.longitude + fraction * (destStation.longitude - otherStation.longitude)
-                        add(Triple(LatLng(trainLat, trainLng), arrival.lineColor, arrival.lineId to arrival.lineName))
+                        add(
+                            LiveTrainMarkerUi(
+                                position = LatLng(trainLat, trainLng),
+                                color = arrival.lineColor,
+                                lineId = arrival.lineId,
+                                lineName = arrival.lineName,
+                                isEstimated = arrivals.isCached || elapsedSec > 20f,
+                            )
+                        )
                     }
             }
         }
@@ -313,13 +502,19 @@ fun MapScreen(
             properties = MapProperties(
                 mapType = mapStyle.mapType,
                 isMyLocationEnabled = false,
+                // 3D buildings + tilt — when enabled, central London gets that
+                // dramatic slanted-view "Google Maps 3D" look.
                 isBuildingEnabled = true,
                 isIndoorEnabled = false,
+                // Live Google traffic overlay — respects user toggle.
+                isTrafficEnabled = trafficEnabled,
             ),
             uiSettings = MapUiSettings(
                 zoomControlsEnabled = false,
                 myLocationButtonEnabled = false,
-                compassEnabled = false,
+                // Enable the native compass — surfaces only after the user
+                // rotates the map, and tapping resets bearing to north.
+                compassEnabled = true,
                 mapToolbarEnabled = false,
                 zoomGesturesEnabled = true,
                 scrollGesturesEnabled = true,
@@ -332,13 +527,20 @@ fun MapScreen(
                 viewModel.selectStation(null)
                 showSearch = false
                 searchQuery = ""
+                viewModel.updateSearchQuery("")
                 showMapStylePicker = false
                 longPressLatLng = null
+                viewModel.clearPinnedLocation()
             },
             onMapLongClick = { latLng ->
                 longPressLatLng = latLng
                 selectedStation = null
                 viewModel.selectStation(null)
+                showSearch = false
+                searchQuery = ""
+                viewModel.updateSearchQuery("")
+                showMapStylePicker = false
+                viewModel.resolvePinnedLocation(latLng.latitude, latLng.longitude)
             },
         ) {
             // Draw tube line polylines — hidden when a journey route is active for clarity
@@ -372,8 +574,15 @@ fun MapScreen(
             }
 
             // ── Active Journey Route Polylines ───────────────────────────────
+            // Premium triple-stack rendering: soft dark shadow UNDER the coloured
+            // core, and a thin lighter highlight ON TOP — gives the route a
+            // lifted 3D "Google Maps Live Navigation" look on every leg type.
             uiState.journeyRoute?.legs?.forEach { leg ->
-                val routePoints = when {
+                // Coordinate validity gate — a coord pair is only trustworthy
+                // when neither value is (0,0); this stops buggy 0-lat/lng fallbacks
+                // from rendering a diagonal line across the globe.
+                fun LatLng.isReal() = latitude != 0.0 && longitude != 0.0
+                val rawPoints = when {
                     leg.polylinePoints.isNotEmpty() ->
                         leg.polylinePoints.map { (lat, lng) -> LatLng(lat, lng) }
                     leg.mode == TransportMode.TUBE ->
@@ -381,35 +590,50 @@ fun MapScreen(
                             .ifEmpty { listOf(LatLng(leg.fromStation.latitude, leg.fromStation.longitude), LatLng(leg.toStation.latitude, leg.toStation.longitude)) }
                     else -> listOf(LatLng(leg.fromStation.latitude, leg.fromStation.longitude), LatLng(leg.toStation.latitude, leg.toStation.longitude))
                 }
+                val routePoints = rawPoints.filter { it.isReal() }
                 if (routePoints.size >= 2) {
+                    val coreColor = when (leg.mode) {
+                        TransportMode.WALKING -> StatusGood
+                        TransportMode.BUS -> Color(0xFFE32017)
+                        TransportMode.TUBE -> leg.line.color
+                    }
+                    val coreWidth = when (leg.mode) {
+                        TransportMode.WALKING -> 9f
+                        TransportMode.BUS -> 12f
+                        TransportMode.TUBE -> 18f
+                    }
+                    // 1/3 — Soft dark shadow underlay for lift
                     Polyline(
                         points = routePoints,
-                        color = when (leg.mode) {
-                            TransportMode.WALKING -> StatusGood
-                            TransportMode.BUS -> Color(0xFFE32017)
-                            TransportMode.TUBE -> leg.line.color
-                        },
-                        width = when (leg.mode) {
-                            TransportMode.WALKING -> 8f
-                            TransportMode.BUS -> 10f
-                            TransportMode.TUBE -> 16f
-                        },
+                        color = Color.Black.copy(alpha = 0.22f),
+                        width = coreWidth + 6f,
+                        zIndex = 2f,
+                        geodesic = true,
+                    )
+                    // 2/3 — Main coloured stroke
+                    Polyline(
+                        points = routePoints,
+                        color = coreColor,
+                        width = coreWidth,
                         pattern = when (leg.mode) {
-                            TransportMode.WALKING -> listOf(Dash(18f), Gap(10f))
-                            TransportMode.BUS -> listOf(Dot(), Gap(8f))
+                            TransportMode.WALKING -> listOf(Dash(22f), Gap(12f))
+                            TransportMode.BUS -> listOf(Dash(14f), Gap(6f))
                             TransportMode.TUBE -> null
                         },
                         zIndex = 3f,
                         geodesic = true,
+                        jointType = com.google.android.gms.maps.model.JointType.ROUND,
                     )
-                    // Shadow/outline for tube lines
+                    // 3/3 — Thin inner highlight centreline (tube only) —
+                    // mimics Google Maps Live Navigation's glossy route.
                     if (leg.mode == TransportMode.TUBE) {
                         Polyline(
                             points = routePoints,
-                            color = Color.Black.copy(alpha = 0.25f),
-                            width = 20f,
-                            zIndex = 2f,
+                            color = Color.White.copy(alpha = 0.35f),
+                            width = coreWidth * 0.28f,
+                            zIndex = 4f,
                             geodesic = true,
+                            jointType = com.google.android.gms.maps.model.JointType.ROUND,
                         )
                     }
                 }
@@ -427,6 +651,47 @@ fun MapScreen(
                         )
                     }
                 }
+            }
+
+            // ── Animated chevrons flowing along the active route ─────────────
+            // Tiny directional arrows that re-sample every 1s along the
+            // flattened polyline — creates a live "flow" effect showing
+            // travel direction at a glance.
+            if (uiState.journeyRoute != null && chevronMarkers.isNotEmpty()) {
+                val chevColor = android.graphics.Color.rgb(25, 118, 210)
+                val chevIcon = bitmapCache.getOrPut("chev_$chevColor") {
+                    BitmapDescriptorFactory.fromBitmap(createChevronBitmap(chevColor))
+                }
+                chevronMarkers.forEachIndexed { idx, pos ->
+                    Marker(
+                        state = MarkerState(position = pos),
+                        icon = chevIcon,
+                        anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
+                        flat = true,
+                        alpha = 0.9f,
+                        zIndex = 4.2f,
+                        title = null,
+                    )
+                }
+            }
+
+            // ── "You are here" live progress marker ──────────────────────────
+            // Interpolated along the route based on elapsed fraction of the
+            // scheduled departure → arrival window. Only shows once the journey
+            // is in progress (0 < fraction < 1).
+            if (youArePos != null && progressFraction != null && progressFraction > 0f && progressFraction < 1f) {
+                val youIcon = bitmapCache.getOrPut("you_on_route") {
+                    BitmapDescriptorFactory.fromBitmap(createYouArePinBitmap())
+                }
+                Marker(
+                    state = MarkerState(position = youArePos),
+                    icon = youIcon,
+                    anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
+                    flat = true,
+                    zIndex = 10f,
+                    title = "📍 You are here",
+                    snippet = "${(progressFraction * 100).toInt()}% through your journey",
+                )
             }
 
             // ── Journey Start / End Markers ───────────────────────────────────
@@ -494,19 +759,18 @@ fun MapScreen(
             }
 
             // ── Live Train Markers ────────────────────────────────────────────
-            liveTrains.forEachIndexed { index, (position, color, lineInfo) ->
-                val (lineId, lineName) = lineInfo
-                val key = "train_${lineId}_${color.toArgb()}"
-                val shortName = lineName.split(" ").firstOrNull()?.take(3)?.uppercase() ?: lineId.take(3).uppercase()
+            liveTrains.forEach { train ->
+                val key = "train_${train.lineId}_${train.color.toArgb()}_${train.isEstimated}"
+                val shortName = train.lineName.split(" ").firstOrNull()?.take(3)?.uppercase() ?: train.lineId.take(3).uppercase()
                 Marker(
-                    state = MarkerState(position = position),
-                    title = "🚂 $lineName",
-                    snippet = "Live train approaching",
+                    state = MarkerState(position = train.position),
+                    title = "🚂 ${train.lineName}",
+                    snippet = if (train.isEstimated) "Estimated from nearby arrivals" else "Live train estimate",
                     icon = bitmapCache.getOrPut(key) {
-                        BitmapDescriptorFactory.fromBitmap(createTrainBitmap(color, shortName))
+                        BitmapDescriptorFactory.fromBitmap(createTrainBitmap(train.color, shortName, train.isEstimated))
                     },
                     zIndex = 7f,
-                    alpha = 0.95f,
+                    alpha = if (train.isEstimated) 0.72f else 0.95f,
                 )
             }
 
@@ -550,6 +814,7 @@ fun MapScreen(
                             true
                         } else {
                             val station = cluster.stations.first()
+                            longPressLatLng = null
                             selectedStation = station
                             viewModel.selectStation(station)
                             true
@@ -589,7 +854,10 @@ fun MapScreen(
                     if (showSearch) {
                         BasicTextField(
                             value = searchQuery,
-                            onValueChange = { searchQuery = it },
+                            onValueChange = {
+                                searchQuery = it
+                                viewModel.updateSearchQuery(it)
+                            },
                             singleLine = true,
                             modifier = Modifier.weight(1f).padding(vertical = Spacing.sm),
                             textStyle = TextStyle(
@@ -600,7 +868,7 @@ fun MapScreen(
                             decorationBox = { inner ->
                                 Box(contentAlignment = Alignment.CenterStart) {
                                     if (searchQuery.isEmpty()) {
-                                        Text("Search stations...", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), fontSize = 16.sp)
+                                        Text("Search stations, landmarks or addresses...", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), fontSize = 16.sp)
                                     }
                                     inner()
                                 }
@@ -610,6 +878,7 @@ fun MapScreen(
                             onClick = {
                                 if (searchQuery.isNotEmpty()) {
                                     searchQuery = ""
+                                    viewModel.updateSearchQuery("")
                                 } else {
                                     showSearch = false
                                     selectedStation = null
@@ -663,10 +932,29 @@ fun MapScreen(
                 }
 
                 // Search results dropdown
-                if (showSearch && searchResults.isNotEmpty()) {
+                if (showSearch && (uiState.isSearchingPlaces || searchResults.isNotEmpty() || (searchQuery.isBlank() && recentPlaces.isNotEmpty()))) {
                     Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)) {
                         Column(modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs)) {
-                            searchResults.forEach { station ->
+                            if (searchQuery.isBlank() && recentPlaces.isNotEmpty()) {
+                                Text(
+                                    text = "Recent places",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = Spacing.xs),
+                                )
+                            }
+                            if (uiState.isSearchingPlaces) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.sm),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center,
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Searching London…", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            (if (searchQuery.isBlank()) recentPlaces else searchResults).forEach { station ->
                                 val stationLineColors = remember(station.id) {
                                     station.lineIds.take(3).mapNotNull { TubeData.getLineById(it) }
                                 }
@@ -677,26 +965,45 @@ fun MapScreen(
                                     color = Color.Transparent,
                                     onClick = {
                                         searchQuery = ""
+                                        viewModel.updateSearchQuery("")
                                         showSearch = false
-                                        selectedStation = station
-                                        viewModel.selectStation(station)
-                                        cameraPositionState.move(
-                                            CameraUpdateFactory.newLatLngZoom(
-                                                LatLng(station.latitude, station.longitude), 15.5f
+                                        longPressLatLng = null
+                                        viewModel.rememberMapPlace(station)
+                                        if (station.id.startsWith("place:")) {
+                                            selectedStation = null
+                                            viewModel.selectStation(null)
+                                            longPressLatLng = com.google.android.gms.maps.model.LatLng(station.latitude, station.longitude)
+                                            viewModel.resolvePinnedLocation(station.latitude, station.longitude, station.name)
+                                            cameraPositionState.move(
+                                                CameraUpdateFactory.newLatLngZoom(
+                                                    LatLng(station.latitude, station.longitude), 15.5f
+                                                )
                                             )
-                                        )
+                                        } else {
+                                            selectedStation = station
+                                            viewModel.selectStation(station)
+                                            cameraPositionState.move(
+                                                CameraUpdateFactory.newLatLngZoom(
+                                                    LatLng(station.latitude, station.longitude), 15.5f
+                                                )
+                                            )
+                                        }
                                     },
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Surface(
-                                            shape = RoundedCornerShape(10.dp),
-                                            color = primaryColor.copy(alpha = 0.12f),
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(primaryColor.copy(alpha = 0.12f)),
                                         ) {
-                                            Box(modifier = Modifier.padding(8.dp)) {
-                                                Icon(Icons.Filled.Train, null, tint = primaryColor, modifier = Modifier.size(16.dp))
+                                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                Icon(if (station.id.startsWith("place:")) Icons.Filled.Place else Icons.Filled.Train, null, tint = primaryColor, modifier = Modifier.size(16.dp))
                                             }
                                         }
                                         Spacer(modifier = Modifier.width(Spacing.sm))
@@ -756,14 +1063,37 @@ fun MapScreen(
                 shadowElevation = 10.dp,
             ) {
                 Column(modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.md)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.NearMe, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "${journeyRoute.totalDurationMinutes} min · ${journeyRoute.totalInterchanges} change${if (journeyRoute.totalInterchanges == 1) "" else "s"}",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Filled.NearMe, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "${journeyRoute.totalDurationMinutes} min · ${journeyRoute.totalInterchanges} change${if (journeyRoute.totalInterchanges == 1) "" else "s"}",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        val (srcLabel, srcColor) = when (journeyRoute.source) {
+                            RouteSource.TFL_API -> "Live" to StatusGood
+                            RouteSource.CACHE -> "Cached" to StatusMinor
+                            RouteSource.LOCAL_DIJKSTRA -> "Offline" to StatusSevere
+                        }
+                        Surface(
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+                            color = srcColor.copy(alpha = 0.12f),
+                        ) {
+                            Text(
+                                srcLabel,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = srcColor,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(10.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -808,6 +1138,7 @@ fun MapScreen(
                     shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
                     shadowElevation = 8.dp,
+                    onClick = { onNavigateToRoute(station.id, null, null, null) },
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.md),
@@ -822,7 +1153,7 @@ fun MapScreen(
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                text = uiState.nearestStationDistanceKm?.let { "Nearest station · ${"%.1f".format(it)} km away" } ?: "Nearest station",
+                                text = uiState.nearestStationDistanceKm?.let { "Nearest station · ${"%.1f".format(it)} km · Tap to plan route" } ?: "Nearest station · Tap to plan route",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -837,6 +1168,8 @@ fun MapScreen(
                                 )
                             }
                         }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(Icons.Filled.DirectionsSubway, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     }
                 }
             }
@@ -862,7 +1195,7 @@ fun MapScreen(
                     item {
                         FilterChip(
                             selected = selectedLineFilter == null,
-                            onClick = { selectedLineFilter = null },
+                            onClick = { viewModel.setSelectedLineFilter(null) },
                             label = { Text("All") },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
@@ -870,10 +1203,36 @@ fun MapScreen(
                             ),
                         )
                     }
+                    item {
+                        FilterChip(
+                            selected = showDisruptedOnly,
+                            onClick = { showDisruptedOnly = !showDisruptedOnly },
+                            label = { Text("⚠ Disrupted") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = StatusSevere.copy(alpha = 0.15f),
+                                selectedLabelColor = StatusSevere,
+                            ),
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = showStepFreeOnly,
+                            onClick = { showStepFreeOnly = !showStepFreeOnly },
+                            label = { Text("♿ Step-free") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = StatusGood.copy(alpha = 0.15f),
+                                selectedLabelColor = StatusGood,
+                            ),
+                        )
+                    }
                     items(lines) { line ->
                         FilterChip(
                             selected = selectedLineFilter == line.id,
-                            onClick = { selectedLineFilter = if (selectedLineFilter == line.id) null else line.id },
+                            onClick = {
+                                viewModel.setSelectedLineFilter(
+                                    if (selectedLineFilter == line.id) null else line.id
+                                )
+                            },
                             label = { Text(line.name, maxLines = 1) },
                             leadingIcon = {
                                 Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(line.color))
@@ -883,6 +1242,94 @@ fun MapScreen(
                                 selectedLabelColor = if (isLightColor(line.color)) Color.Black else line.color,
                             ),
                         )
+                    }
+                }
+            }
+        }
+
+        // ── Live route-progress bottom card ───────────────────────────────
+        // Shows current status of the active journey — "Leaving in Xm" before
+        // departure, "On your journey · X% · Next Y" while in progress, and
+        // "Arrived" once complete. Updates every 1s from journeyTickMs.
+        uiState.journeyRoute?.let { route ->
+            val fraction = progressFraction
+            val nextLeg = route.legs.firstOrNull { leg ->
+                leg.scheduledArrivalEpochMs > System.currentTimeMillis()
+            }
+            val (title, subtitle) = remember(fraction, journeyTickMs, route) {
+                when {
+                    fraction == null -> "${route.totalDurationMinutes} min journey" to
+                        "${route.legs.size} step${if (route.legs.size != 1) "s" else ""} · plan ready"
+                    fraction <= 0f -> {
+                        val msToDep = route.scheduledDepartureEpochMs - System.currentTimeMillis()
+                        val minsToDep = (msToDep / 60_000L).toInt().coerceAtLeast(0)
+                        "Leave in $minsToDep min" to "Journey starts soon · ${route.totalDurationMinutes} min total"
+                    }
+                    fraction >= 1f -> "Arrived" to "Journey complete · tap to close"
+                    else -> {
+                        val pct = (fraction * 100).toInt()
+                        val remMs = route.scheduledArrivalEpochMs - System.currentTimeMillis()
+                        val remMin = (remMs / 60_000L).toInt().coerceAtLeast(0)
+                        val nextLabel = when (nextLeg?.mode) {
+                            TransportMode.WALKING -> "Walk to ${nextLeg.toStation.name}"
+                            TransportMode.BUS -> "Bus to ${nextLeg.toStation.name}"
+                            TransportMode.TUBE -> "${nextLeg.line.name} to ${nextLeg.toStation.name}"
+                            null -> "Heading to ${route.toStation.name}"
+                        }
+                        "$pct% · $remMin min to go" to nextLabel
+                    }
+                }
+            }
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .navigationBarsPadding()
+                    .padding(start = Spacing.screenHorizontal, bottom = Spacing.lg, end = 90.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 10.dp,
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier.size(10.dp).clip(CircleShape)
+                                .background(
+                                    when {
+                                        fraction == null || fraction <= 0f -> StatusMinor
+                                        fraction >= 1f -> StatusGood
+                                        else -> MaterialTheme.colorScheme.primary
+                                    }
+                                )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    // Thin progress bar
+                    if (fraction != null && fraction in 0f..1f) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(fraction)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(MaterialTheme.colorScheme.primary)
+                            )
+                        }
                     }
                 }
             }
@@ -900,23 +1347,112 @@ fun MapScreen(
                 Icon(mapStyle.icon, "Map style", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
             }
 
+            // Cycling re-centre FAB —
+            //   Tap 1 → centre on user
+            //   Tap 2 → fit the active route (falls through to #3 if no route)
+            //   Tap 3 → fit EVERYTHING (user + route) if both exist
             SmallFloatingActionButton(
                 onClick = {
-                    if (uiState.userLat != null && uiState.userLng != null) {
-                        cameraPositionState.move(
-                            CameraUpdateFactory.newLatLngZoom(
-                                LatLng(uiState.userLat!!, uiState.userLng!!),
-                                14f,
-                            )
-                        )
-                    } else {
-                        cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(LONDON_CENTER, DEFAULT_ZOOM))
+                    val route = uiState.journeyRoute
+                    val userLat = uiState.userLat; val userLng = uiState.userLng
+                    val nextMode = (recenterMode + 1) % 3
+                    recenterMode = nextMode
+                    cameraScope.launch {
+                        try {
+                            when (nextMode) {
+                                0 -> {
+                                    if (userLat != null && userLng != null) {
+                                        cameraPositionState.animate(
+                                            CameraUpdateFactory.newLatLngZoom(LatLng(userLat, userLng), 15f),
+                                            600,
+                                        )
+                                    } else cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(LONDON_CENTER, DEFAULT_ZOOM))
+                                }
+                                1 -> {
+                                    if (route != null && routeFlatPath.size >= 2) {
+                                        val b = LatLngBounds.Builder()
+                                        routeFlatPath.forEach(b::include)
+                                        cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(b.build(), 160), 800)
+                                    } else if (userLat != null && userLng != null) {
+                                        cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(LatLng(userLat, userLng), 15f), 600)
+                                    }
+                                }
+                                2 -> {
+                                    val b = LatLngBounds.Builder()
+                                    var has = false
+                                    if (route != null) routeFlatPath.forEach { b.include(it); has = true }
+                                    if (userLat != null && userLng != null) { b.include(LatLng(userLat, userLng)); has = true }
+                                    if (has) cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(b.build(), 180), 900)
+                                }
+                            }
+                        } catch (_: Exception) { /* swallow rare camera exceptions */ }
                     }
                 },
-                containerColor = MaterialTheme.colorScheme.surface,
+                containerColor = when (recenterMode) {
+                    1 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    2 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                    else -> MaterialTheme.colorScheme.surface
+                },
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
             ) {
-                Icon(Icons.Filled.MyLocation, "Center", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                Icon(
+                    when (recenterMode) {
+                        1 -> Icons.Filled.NearMe
+                        2 -> Icons.Filled.Layers
+                        else -> Icons.Filled.MyLocation
+                    },
+                    when (recenterMode) {
+                        1 -> "Fit route"
+                        2 -> "Fit all"
+                        else -> "My location"
+                    },
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            // Phase D: follow-mode toggle. When active, camera re-centers on user each time
+            // their GPS moves.
+            SmallFloatingActionButton(
+                onClick = { followMode = !followMode },
+                containerColor = if (followMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
+            ) {
+                Icon(
+                    Icons.Filled.NearMe,
+                    if (followMode) "Following active" else "Follow me",
+                    tint = if (followMode) Color.White else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            // Traffic layer toggle — overlays live Google traffic colours.
+            SmallFloatingActionButton(
+                onClick = { trafficEnabled = !trafficEnabled },
+                containerColor = if (trafficEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
+            ) {
+                Icon(
+                    Icons.Filled.DirectionsBus,
+                    if (trafficEnabled) "Traffic on" else "Traffic off",
+                    tint = if (trafficEnabled) Color.White else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            // 3D tilt toggle — slants the camera to a 55° perspective for the
+            // dramatic Google-Maps-3D look.
+            SmallFloatingActionButton(
+                onClick = { tilt3dEnabled = !tilt3dEnabled },
+                containerColor = if (tilt3dEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Terrain,
+                    if (tilt3dEnabled) "3D on" else "3D off",
+                    tint = if (tilt3dEnabled) Color.White else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
             }
         }
 
@@ -934,7 +1470,10 @@ fun MapScreen(
                 Column(modifier = Modifier.padding(Spacing.sm)) {
                     MapStyle.entries.forEach { style ->
                         Surface(
-                            onClick = { mapStyle = style; showMapStylePicker = false },
+                            onClick = {
+                                viewModel.setMapStyle(style.name)
+                                showMapStylePicker = false
+                            },
                             shape = RoundedCornerShape(12.dp),
                             color = if (mapStyle == style) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent,
                         ) {
@@ -965,7 +1504,39 @@ fun MapScreen(
                 enter = fadeIn() + slideInVertically { it / 2 },
                 exit = fadeOut() + slideOutVertically { it / 2 },
             ) {
-                NetworkStatusStrip(lineStatuses = uiState.lineStatuses)
+                NetworkStatusStrip(
+                    lineStatuses = uiState.lineStatuses,
+                    focusedLineId = selectedLineFilter,
+                )
+            }
+            AnimatedVisibility(
+                visible = uiState.isLoadingJourney || uiState.journeyErrorMessage != null,
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = fadeOut() + slideOutVertically { it / 2 },
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (uiState.journeyErrorMessage != null) StatusSevere.copy(alpha = 0.92f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
+                    shadowElevation = 8.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (uiState.isLoadingJourney) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+                        } else {
+                            Icon(Icons.Filled.Info, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (uiState.isLoadingJourney) "Loading route overlay…" else (uiState.journeyErrorMessage ?: ""),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
             }
             Surface(
                 shape = RoundedCornerShape(12.dp),
@@ -981,7 +1552,7 @@ fun MapScreen(
                             "${uiState.journeyRoute!!.legs.size} steps · active route"
                         } else {
                             "${filteredStations.size} stations" +
-                                if (selectedLineFilter != null) " · ${TubeData.getLineById(selectedLineFilter!!)?.name ?: ""}" else ""
+                                    if (selectedLineFilter != null) " · ${TubeData.getLineById(selectedLineFilter!!)?.name ?: ""}" else ""
                         },
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
@@ -1010,7 +1581,7 @@ fun MapScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        if (uiState.isUsingCachedStatuses) Icons.Filled.Info else Icons.Filled.Info,
+                        if (uiState.isUsingCachedStatuses) Icons.Filled.Schedule else Icons.Filled.WifiOff,
                         null,
                         tint = Color.White,
                         modifier = Modifier.size(14.dp),
@@ -1045,10 +1616,10 @@ fun MapScreen(
                 Column(modifier = Modifier.padding(18.dp)) {
                     Box(modifier = Modifier.align(Alignment.CenterHorizontally).width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)))
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("Map location", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(uiState.pinnedLocationLabel ?: "Map location", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     longPressLatLng?.let {
                         Text(
-                            "${"%,.5f".format(it.latitude)}, ${"%,.5f".format(it.longitude)}",
+                            if (uiState.isResolvingPinnedLabel) "Resolving street or area…" else "${"%,.5f".format(it.latitude)}, ${"%,.5f".format(it.longitude)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1064,26 +1635,29 @@ fun MapScreen(
                                 val lp = longPressLatLng
                                 longPressLatLng = null
                                 if (lp != null) {
-                                    val nearest = TubeData.getAllStationsSorted().minByOrNull {
-                                        val dlat = it.latitude - lp.latitude
-                                        val dlng = it.longitude - lp.longitude
-                                        dlat * dlat + dlng * dlng
-                                    }
-                                    nearest?.let { onNavigateToRoute(it.id) }
+                                    onNavigateToRoute(
+                                        null,
+                                        uiState.pinnedLocationLabel ?: "Pinned location",
+                                        lp.latitude,
+                                        lp.longitude,
+                                    )
                                 }
                             },
                         ) {
                             Row(modifier = Modifier.padding(11.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.DirectionsSubway, null, tint = Color.White, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(5.dp))
-                                Text("Route from here", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = Color.White)
+                                Text("Route to here", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = Color.White)
                             }
                         }
                         Surface(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            onClick = { longPressLatLng = null },
+                            onClick = {
+                                longPressLatLng = null
+                                viewModel.clearPinnedLocation()
+                            },
                         ) {
                             Row(modifier = Modifier.padding(11.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.Close, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
@@ -1110,13 +1684,13 @@ fun MapScreen(
                     isLoadingArrivals = uiState.isLoadingArrivals,
                     arrivalsError = uiState.arrivalsError,
                     lineStatuses = uiState.lineStatuses,
-                    arrivalsUpdatedAt = uiState.nearbyArrivalsUpdatedAt,
+                    arrivalsUpdatedAt = uiState.stationArrivals?.lastUpdated ?: 0L,
                     onClose = {
                         selectedStation = null
                         viewModel.selectStation(null)
                     },
                     onViewDetails = { onStationClick(station.id) },
-                    onPlanRoute = { onNavigateToRoute(station.id) },
+                    onPlanRoute = { onNavigateToRoute(station.id, null, null, null) },
                 )
             }
         }
@@ -1166,10 +1740,12 @@ private fun StationInfoCard(
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 // Station icon with line color
                 Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = (stationLines.firstOrNull()?.color ?: MaterialTheme.colorScheme.primary).copy(alpha = 0.12f),
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(stationLines.firstOrNull()?.color?.copy(alpha = 0.12f) ?: MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
                 ) {
-                    Box(modifier = Modifier.padding(10.dp)) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Icon(Icons.Filled.Train, null, tint = stationLines.firstOrNull()?.color ?: MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
                     }
                 }
@@ -1204,8 +1780,9 @@ private fun StationInfoCard(
                     val statusColor = when {
                         ls == null -> line.color
                         ls.isGoodService -> StatusGood
-                        ls.statusSeverity <= 3 -> StatusSevere
-                        else -> StatusMinor
+                        ls.statusSeverity in 1..6 -> StatusSevere
+                        ls.statusSeverity in 7..9 -> StatusMinor
+                        else -> StatusGood
                     }
                     Surface(shape = RoundedCornerShape(10.dp), color = line.color.copy(alpha = 0.12f)) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1240,7 +1817,7 @@ private fun StationInfoCard(
                     if (station.wifiAvailable) {
                         Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)) {
                             Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.NearMe, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
+                                Icon(Icons.Filled.WifiTethering, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("WiFi", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
                             }
@@ -1279,13 +1856,15 @@ private fun StationInfoCard(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     } else if (arrivals != null) {
+                        val freshnessColor = if (arrivals.isCached) StatusMinor else StatusGood
+                        val freshnessPrefix = if (arrivals.isCached) "Cached" else "Live"
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(StatusGood))
+                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(freshnessColor))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                freshnessLabel?.let { "Live · $it" } ?: "Live",
+                                freshnessLabel?.let { "$freshnessPrefix · $it" } ?: freshnessPrefix,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = StatusGood,
+                                color = freshnessColor,
                                 fontWeight = FontWeight.Bold,
                             )
                         }
@@ -1407,7 +1986,7 @@ private fun StationInfoCard(
                     onClick = onPlanRoute,
                 ) {
                     Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Star, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.DirectionsSubway, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Plan Route", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                     }
@@ -1523,9 +2102,7 @@ private fun createUserLocationBitmap(): android.graphics.Bitmap {
     }
     canvas.drawCircle(cx, cx, cx - 7f, bluePaint)
     // Inner white dot
-    val dotPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.FILL
-    }
+    val dotPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.FILL }
     canvas.drawCircle(cx, cx, 5.5f, dotPaint)
     // Directional arrow hint (top wedge)
     val arrowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -1540,102 +2117,255 @@ private fun createUserLocationBitmap(): android.graphics.Bitmap {
 }
 
 private fun createRouteEndpointBitmap(argbColor: Int, label: String): android.graphics.Bitmap {
-    val size = 52
+    // Teardrop-style pin with coloured core, glowing aura, and bold letter —
+    // matches Google Maps' destination-pin feel.
+    val size = 72
     val cx = size / 2f
+    val cy = 32f // pin body centre (pointer protrudes downward)
     val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
+
+    // Aura glow — premium, airy feel
+    val auraPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = argbColor
+        alpha = 70
+        maskFilter = android.graphics.BlurMaskFilter(10f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+    canvas.drawCircle(cx, cy, 24f, auraPaint)
+
+    // Soft drop shadow
     val shadowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.argb(60, 0, 0, 0)
+        color = android.graphics.Color.argb(80, 0, 0, 0)
         maskFilter = android.graphics.BlurMaskFilter(5f, android.graphics.BlurMaskFilter.Blur.NORMAL)
     }
-    canvas.drawCircle(cx + 1.5f, cx + 2f, cx - 4f, shadowPaint)
-    val fillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = argbColor }
-    canvas.drawCircle(cx, cx, cx - 4f, fillPaint)
-    val strokePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.STROKE; strokeWidth = 3.5f
+    canvas.drawCircle(cx + 1.5f, cy + 3f, 21f, shadowPaint)
+
+    // Pointer (small wedge descending from the circle)
+    val pointerPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = argbColor; style = android.graphics.Paint.Style.FILL
     }
-    canvas.drawCircle(cx, cx, cx - 4f, strokePaint)
+    val pointerPath = android.graphics.Path().apply {
+        moveTo(cx - 8f, cy + 15f)
+        lineTo(cx + 8f, cy + 15f)
+        lineTo(cx, cy + 32f)
+        close()
+    }
+    canvas.drawPath(pointerPath, pointerPaint)
+
+    // White outer ring halo
+    val whiteRing = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.FILL
+    }
+    canvas.drawCircle(cx, cy, 22f, whiteRing)
+
+    // Coloured inner disc
+    val fillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = argbColor; style = android.graphics.Paint.Style.FILL
+    }
+    canvas.drawCircle(cx, cy, 18.5f, fillPaint)
+
+    // Subtle inner highlight arc for a glossy 3D feel
+    val glossPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(55, 255, 255, 255); style = android.graphics.Paint.Style.FILL
+    }
+    canvas.drawCircle(cx - 5f, cy - 5f, 8f, glossPaint)
+
+    // Letter label (A / B)
     val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE; textSize = 18f; isFakeBoldText = true
+        color = android.graphics.Color.WHITE; textSize = 22f; isFakeBoldText = true
         textAlign = android.graphics.Paint.Align.CENTER
     }
-    canvas.drawText(label, cx, cx + textPaint.textSize / 3f, textPaint)
+    canvas.drawText(label, cx, cy + textPaint.textSize / 3f, textPaint)
     return bitmap
 }
 
-private fun createTrainBitmap(color: Color, shortLabel: String = ""): android.graphics.Bitmap {
-    val w = 80; val h = 60
+// ── Geometry helpers for chevron-flow + "you-are-here" ──────────────────
+private fun haversineKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
+    val r = 6371.0
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLng = Math.toRadians(lng2 - lng1)
+    val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+        Math.sin(dLng / 2) * Math.sin(dLng / 2)
+    return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+/** Sample a point along a polyline at a given [0..1] fraction of total length. */
+private fun sampleAlongPath(path: List<LatLng>, cumKm: FloatArray, frac: Float): LatLng {
+    if (path.isEmpty()) return LONDON_CENTER
+    if (path.size == 1) return path[0]
+    val total = cumKm.last()
+    if (total <= 0f) return path[0]
+    val target = (frac.coerceIn(0f, 1f) * total)
+    var i = 1
+    while (i < cumKm.size && cumKm[i] < target) i++
+    if (i >= cumKm.size) return path.last()
+    val segLen = (cumKm[i] - cumKm[i - 1]).coerceAtLeast(0.0001f)
+    val t = ((target - cumKm[i - 1]) / segLen).coerceIn(0f, 1f)
+    val a = path[i - 1]; val b = path[i]
+    return LatLng(
+        a.latitude + t * (b.latitude - a.latitude),
+        a.longitude + t * (b.longitude - a.longitude),
+    )
+}
+
+private fun createChevronBitmap(argbColor: Int): android.graphics.Bitmap {
+    // Small directional arrow — rendered at each sampled chevron position to
+    // indicate direction of travel along the route.
+    val size = 22
+    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    val whitePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.STROKE; strokeWidth = 4f
+        strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
+    }
+    val fillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = argbColor; style = android.graphics.Paint.Style.STROKE; strokeWidth = 2.2f
+        strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
+    }
+    val path = android.graphics.Path().apply {
+        moveTo(5f, 4f); lineTo(16f, 11f); lineTo(5f, 18f)
+    }
+    canvas.drawPath(path, whitePaint)
+    canvas.drawPath(path, fillPaint)
+    return bitmap
+}
+
+private fun createYouArePinBitmap(): android.graphics.Bitmap {
+    // Pulsing-style blue dot with a crisp white ring — used to represent the
+    // user's live progress along an active journey route.
+    val size = 46; val cx = size / 2f
+    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    val glow = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(33, 150, 243); alpha = 100
+        maskFilter = android.graphics.BlurMaskFilter(7f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+    canvas.drawCircle(cx, cx, cx - 6f, glow)
+    val white = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+    canvas.drawCircle(cx, cx, cx - 6f, white)
+    val blue = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(25, 118, 210) }
+    canvas.drawCircle(cx, cx, cx - 11f, blue)
+    val dot = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+    canvas.drawCircle(cx, cx, 4.5f, dot)
+    return bitmap
+}
+
+private fun createTrainBitmap(color: Color, shortLabel: String = "", isEstimated: Boolean = false): android.graphics.Bitmap {
+    // Elite, modern tube-train marker — sleek capsule with a TfL-style
+    // centre bar, LED aura, gradient gloss and a tiny front windshield.
+    // Dropped the toy-train wheels / rail — this is a map marker, not an
+    // illustration.
+    val w = 96; val h = 62
     val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
 
-    // Glow/shadow behind the body
-    val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+    val bodyRect = android.graphics.RectF(6f, 10f, 90f, 44f)
+    val cornerR = 17f
+
+    // 1 — Aura glow (line-coloured, airy halo)
+    val auraPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.color = color.toArgb()
-        maskFilter = android.graphics.BlurMaskFilter(9f, android.graphics.BlurMaskFilter.Blur.NORMAL)
-        alpha = 110
+        alpha = if (isEstimated) 70 else 130
+        maskFilter = android.graphics.BlurMaskFilter(12f, android.graphics.BlurMaskFilter.Blur.NORMAL)
     }
-    canvas.drawRoundRect(android.graphics.RectF(4f, 6f, 76f, 40f), 11f, 11f, glowPaint)
+    canvas.drawRoundRect(bodyRect, cornerR, cornerR, auraPaint)
 
-    // Main body
-    val bodyPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = color.toArgb() }
-    canvas.drawRoundRect(android.graphics.RectF(2f, 4f, 78f, 42f), 11f, 11f, bodyPaint)
+    // 2 — Soft drop shadow
+    val shadowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = android.graphics.Color.argb(70, 0, 0, 0)
+        maskFilter = android.graphics.BlurMaskFilter(5f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+    val shadowRect = android.graphics.RectF(bodyRect).apply { offset(1f, 3f) }
+    canvas.drawRoundRect(shadowRect, cornerR, cornerR, shadowPaint)
 
-    // White border outline
+    // 3 — Main body with a subtle vertical gradient (lighter top, richer bottom)
+    val bodyArgb = color.toArgb()
+    val darker = android.graphics.Color.rgb(
+        (android.graphics.Color.red(bodyArgb) * 0.78f).toInt().coerceIn(0, 255),
+        (android.graphics.Color.green(bodyArgb) * 0.78f).toInt().coerceIn(0, 255),
+        (android.graphics.Color.blue(bodyArgb) * 0.78f).toInt().coerceIn(0, 255),
+    )
+    val bodyPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        shader = android.graphics.LinearGradient(
+            0f, bodyRect.top, 0f, bodyRect.bottom,
+            bodyArgb, darker, android.graphics.Shader.TileMode.CLAMP,
+        )
+    }
+    canvas.drawRoundRect(bodyRect, cornerR, cornerR, bodyPaint)
+
+    // 4 — Crisp white stroke (lemon-tinted for estimated positions)
     val outlinePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.STROKE; strokeWidth = 2.5f
+        this.color = if (isEstimated) android.graphics.Color.argb(230, 255, 244, 180) else android.graphics.Color.WHITE
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = if (isEstimated) 2.2f else 2.8f
     }
-    canvas.drawRoundRect(android.graphics.RectF(2f, 4f, 78f, 42f), 11f, 11f, outlinePaint)
+    canvas.drawRoundRect(bodyRect, cornerR, cornerR, outlinePaint)
 
-    // Line name label on the body (draw a white semi-transparent band first)
+    // 5 — Top gloss highlight (thin white ellipse for 3D sheen)
+    val glossPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = android.graphics.Color.argb(65, 255, 255, 255)
+    }
+    canvas.drawRoundRect(
+        android.graphics.RectF(bodyRect.left + 6f, bodyRect.top + 3f, bodyRect.right - 6f, bodyRect.top + 12f),
+        6f, 6f, glossPaint,
+    )
+
+    // 6 — Centre label bar: short line code on a dark roundel
     if (shortLabel.isNotEmpty()) {
-        val labelBgPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = android.graphics.Color.argb(140, 0, 0, 0)
+        val labelBg = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = android.graphics.Color.argb(170, 0, 0, 0)
         }
-        canvas.drawRoundRect(android.graphics.RectF(8f, 10f, 72f, 28f), 6f, 6f, labelBgPaint)
-        val textColor = if (isLightColor(color)) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+        canvas.drawRoundRect(android.graphics.RectF(18f, 18f, 68f, 36f), 9f, 9f, labelBg)
         val labelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = android.graphics.Color.WHITE
+            this.color = if (isEstimated) android.graphics.Color.rgb(255, 244, 180) else android.graphics.Color.WHITE
             textSize = 13f
             isFakeBoldText = true
             textAlign = android.graphics.Paint.Align.CENTER
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
-        canvas.drawText(shortLabel, 40f, 23f, labelPaint)
-    } else {
-        // Fallback: windows row
-        val winPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = android.graphics.Color.argb(200, 220, 240, 255)
+        canvas.drawText(shortLabel, 43f, 32f, labelPaint)
+    }
+
+    // 7 — Front windshield (right side) — bright cyan tint
+    val windshield = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = android.graphics.Color.argb(210, 180, 230, 255)
+    }
+    canvas.drawRoundRect(android.graphics.RectF(74f, 17f, 86f, 37f), 5f, 5f, windshield)
+
+    // 8 — LED headlight dot on the leading edge
+    val ledPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = android.graphics.Color.argb(255, 255, 245, 200)
+    }
+    canvas.drawCircle(88f, 27f, 2.2f, ledPaint)
+
+    // 9 — EST flag for stale / interpolated positions
+    if (isEstimated) {
+        val flagBg = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = android.graphics.Color.argb(220, 120, 90, 0)
         }
-        listOf(8f, 24f, 40f, 56f).forEach { x ->
-            canvas.drawRoundRect(android.graphics.RectF(x, 10f, x + 13f, 24f), 3f, 3f, winPaint)
+        canvas.drawRoundRect(android.graphics.RectF(34f, 46f, 62f, 58f), 4f, 4f, flagBg)
+        val estPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = android.graphics.Color.rgb(255, 244, 180)
+            textSize = 9.5f; isFakeBoldText = true
+            textAlign = android.graphics.Paint.Align.CENTER
         }
+        canvas.drawText("EST", 48f, 55f, estPaint)
     }
-
-    // Headlight on right end
-    val headPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = android.graphics.Color.argb(230, 255, 255, 180)
-    }
-    canvas.drawRoundRect(android.graphics.RectF(66f, 8f, 76f, 22f), 3f, 3f, headPaint)
-
-    // Wheels
-    val wheelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.rgb(40, 40, 40) }
-    val wheelShine = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.rgb(130, 130, 130) }
-    listOf(15f, 40f, 65f).forEach { x ->
-        canvas.drawCircle(x, 50f, 7.5f, wheelPaint)
-        canvas.drawCircle(x, 50f, 3.5f, wheelShine)
-    }
-
-    // Rail bar
-    val railPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = android.graphics.Color.rgb(80, 80, 80); strokeWidth = 3f; style = android.graphics.Paint.Style.STROKE
-    }
-    canvas.drawLine(4f, 50f, 76f, 50f, railPaint)
-
     return bitmap
 }
 
 @Composable
-private fun NetworkStatusStrip(lineStatuses: List<LineStatus>) {
-    val disrupted = lineStatuses.filter { !it.isGoodService }
+private fun NetworkStatusStrip(lineStatuses: List<LineStatus>, focusedLineId: String? = null) {
+    val disrupted = lineStatuses
+        .filter { !it.isGoodService }
+        .let { statuses ->
+            focusedLineId?.let { lineId ->
+                val focused = statuses.filter { it.lineId == lineId }
+                if (focused.isNotEmpty()) focused + statuses.filter { it.lineId != lineId }
+                else statuses
+            } ?: statuses
+        }
     if (disrupted.isEmpty()) return
     val severe = disrupted.count { it.statusSeverity <= 3 }
     val badgeColor = if (severe > 0) StatusSevere else StatusMinor

@@ -91,6 +91,26 @@ val md_theme_light_surfaceVariant = TubeSurface2
 val md_theme_light_onSurfaceVariant = TubeInk2
 val md_theme_light_outline = TubeBorder
 
+// ────────────────────────────────────────────────────────────────
+// Theme-aware brand gradient colors
+// ────────────────────────────────────────────────────────────────
+// Used by UnifiedHeader and hero cards so they adapt to dark mode
+// instead of always rendering a hard light-mode navy/blue gradient.
+
+// Light mode hero gradient — deep navy → primary blue (legacy look)
+val BrandGradientTopLight    = Color(0xFF0A1628)
+val BrandGradientMidLight    = Color(0xFF0D2240)
+val BrandGradientBottomLight = Color(0xFF14407A)
+
+// Dark mode hero gradient — lifted, slightly tinted toward primary,
+// matches darkColorScheme surfaces without blinding the user.
+val BrandGradientTopDark     = Color(0xFF05080F)
+val BrandGradientMidDark     = Color(0xFF0A1220)
+val BrandGradientBottomDark  = Color(0xFF142C52)
+
+// Neutral on-brand text/icon color — always white on these gradients.
+val OnBrandGradient          = Color(0xFFFFFFFF)
+
 // Material 3 scheme - Dark
 val md_theme_dark_primary = Color(0xFFA5C8FF)
 val md_theme_dark_onPrimary = Color(0xFF00315B)
