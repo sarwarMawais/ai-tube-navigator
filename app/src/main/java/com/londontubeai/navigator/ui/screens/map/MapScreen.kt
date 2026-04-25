@@ -36,9 +36,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.AccessibleForward
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DirectionsSubway
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.DirectionsWalk
@@ -81,6 +84,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -90,6 +95,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Calendar
 import com.londontubeai.navigator.data.model.LineStatus
 import com.londontubeai.navigator.data.model.Station
 import com.londontubeai.navigator.data.model.RouteSource
@@ -171,6 +177,7 @@ fun MapScreen(
     val connections = remember { TubeData.connections }
 
     val cameraScope = androidx.compose.runtime.rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
     var selectedStation by remember { mutableStateOf<Station?>(null) }
     var selectedLineFilter by remember { mutableStateOf<String?>(null) }
     var showLineFilters by remember { mutableStateOf(false) }
@@ -1271,43 +1278,61 @@ fun MapScreen(
         }
 
         // ── Live route-progress bottom card ───────────────────────────────
-        // Shows current status of the active journey — "Leaving in Xm" before
-        // departure, "On your journey · X% · Next Y" while in progress, and
-        // "Arrived" once complete. Updates every 1s from journeyTickMs.
+        // Shows active journey status, ETA clock, current leg, and a
+        // dismissible × button. Tapping anywhere expands the leg breakdown.
+        var progressCardExpanded by remember { mutableStateOf(false) }
         uiState.journeyRoute?.let { route ->
             val fraction = progressFraction
-            val nextLeg = route.legs.firstOrNull { leg ->
-                leg.scheduledArrivalEpochMs > System.currentTimeMillis()
+            val nowMs = journeyTickMs
+            // Identify the "current leg" by finding the first leg that hasn't
+            // finished yet. Falls back to the last leg if the journey is over.
+            val currentLegIndex = remember(fraction, nowMs, route) {
+                val idx = route.legs.indexOfFirst { it.scheduledArrivalEpochMs > nowMs }
+                if (idx < 0) route.legs.size - 1 else idx
             }
-            val (title, subtitle) = remember(fraction, journeyTickMs, route) {
-                when {
-                    fraction == null -> "${route.totalDurationMinutes} min journey" to
-                        "${route.legs.size} step${if (route.legs.size != 1) "s" else ""} · plan ready"
-                    fraction <= 0f -> {
-                        val msToDep = route.scheduledDepartureEpochMs - System.currentTimeMillis()
-                        val minsToDep = (msToDep / 60_000L).toInt().coerceAtLeast(0)
-                        "Leave in $minsToDep min" to "Journey starts soon · ${route.totalDurationMinutes} min total"
-                    }
-                    fraction >= 1f -> "Arrived" to "Journey complete · tap to close"
-                    else -> {
-                        val pct = (fraction * 100).toInt()
-                        val remMs = route.scheduledArrivalEpochMs - System.currentTimeMillis()
-                        val remMin = (remMs / 60_000L).toInt().coerceAtLeast(0)
-                        val nextLabel = when (nextLeg?.mode) {
-                            TransportMode.WALKING -> "Walk to ${nextLeg.toStation.name}"
-                            TransportMode.BUS -> "Bus to ${nextLeg.toStation.name}"
-                            TransportMode.TUBE -> "${nextLeg.line.name} to ${nextLeg.toStation.name}"
-                            null -> "Heading to ${route.toStation.name}"
-                        }
-                        "$pct% · $remMin min to go" to nextLabel
-                    }
+            val currentLeg = route.legs.getOrNull(currentLegIndex)
+            val nextLeg = route.legs.getOrNull(currentLegIndex + 1)
+            // Real-wall-clock ETA — prefer the TfL-scheduled arrival; fall back
+            // to now + remaining duration when we don't have scheduled times.
+            val etaLabel: String? = remember(route, fraction, nowMs) {
+                val arrMs = when {
+                    route.scheduledArrivalEpochMs > 0L -> route.scheduledArrivalEpochMs
+                    else -> nowMs + route.totalDurationMinutes * 60_000L
+                }
+                val cal = Calendar.getInstance().apply { timeInMillis = arrMs }
+                "%02d:%02d".format(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+            }
+            val title = when {
+                fraction == null -> "${route.totalDurationMinutes} min journey"
+                fraction <= 0f -> {
+                    val minsToDep = ((route.scheduledDepartureEpochMs - nowMs) / 60_000L).toInt().coerceAtLeast(0)
+                    "Leave in $minsToDep min"
+                }
+                fraction >= 1f -> "Arrived 🎉"
+                else -> {
+                    val remMin = ((route.scheduledArrivalEpochMs - nowMs) / 60_000L).toInt().coerceAtLeast(0)
+                    "$remMin min to go · ${(fraction * 100).toInt()}%"
+                }
+            }
+            val subtitle = when {
+                fraction == null -> "${route.legs.size} step${if (route.legs.size != 1) "s" else ""} · plan ready"
+                fraction >= 1f -> "${route.toStation.name} · journey complete"
+                currentLeg == null -> "Heading to ${route.toStation.name}"
+                else -> when (currentLeg.mode) {
+                    TransportMode.WALKING -> "Walk to ${currentLeg.toStation.name}"
+                    TransportMode.BUS -> "Bus to ${currentLeg.toStation.name}"
+                    TransportMode.TUBE -> "${currentLeg.line.name} line → ${currentLeg.toStation.name}"
                 }
             }
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .navigationBarsPadding()
-                    .padding(start = Spacing.screenHorizontal, bottom = Spacing.lg, end = 90.dp),
+                    .padding(start = Spacing.screenHorizontal, bottom = Spacing.lg, end = 90.dp)
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        progressCardExpanded = !progressCardExpanded
+                    },
                 shape = RoundedCornerShape(18.dp),
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 10.dp,
@@ -1325,7 +1350,45 @@ fun MapScreen(
                                 )
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            if (etaLabel != null) {
+                                Text(
+                                    "Arriving at $etaLabel",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                        // Expand/collapse chevron
+                        Icon(
+                            if (progressCardExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                            if (progressCardExpanded) "Collapse" else "Expand",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        // Dismiss — tears down the active journey and returns
+                        // the map to free-roam mode.
+                        Surface(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.loadJourney(null, null)
+                                progressCardExpanded = false
+                            },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(start = 6.dp),
+                        ) {
+                            Box(modifier = Modifier.padding(6.dp), contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    "Stop navigation",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -1354,6 +1417,148 @@ fun MapScreen(
                             )
                         }
                     }
+                    // Expandable leg breakdown — appears when user taps the card.
+                    AnimatedVisibility(visible = progressCardExpanded) {
+                        Column(modifier = Modifier.padding(top = 10.dp)) {
+                            Box(modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            route.legs.forEachIndexed { idx, leg ->
+                                val isCurrent = idx == currentLegIndex && fraction != null && fraction in 0f..1f
+                                val isDone = fraction != null && idx < currentLegIndex
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(18.dp).clip(CircleShape).background(
+                                            when {
+                                                isDone -> StatusGood.copy(alpha = 0.2f)
+                                                isCurrent -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                                else -> MaterialTheme.colorScheme.surfaceVariant
+                                            }
+                                        ),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            when (leg.mode) {
+                                                TransportMode.WALKING -> Icons.Filled.DirectionsWalk
+                                                TransportMode.BUS -> Icons.Filled.DirectionsBus
+                                                TransportMode.TUBE -> Icons.Filled.DirectionsSubway
+                                            },
+                                            null,
+                                            modifier = Modifier.size(12.dp),
+                                            tint = when {
+                                                isDone -> StatusGood
+                                                isCurrent -> MaterialTheme.colorScheme.primary
+                                                leg.mode == TransportMode.TUBE -> leg.line.color
+                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            when (leg.mode) {
+                                                TransportMode.WALKING -> "Walk to ${leg.toStation.name}"
+                                                TransportMode.BUS -> "Bus to ${leg.toStation.name}"
+                                                TransportMode.TUBE -> "${leg.line.name} · ${leg.fromStation.name} → ${leg.toStation.name}"
+                                            },
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isDone) MaterialTheme.colorScheme.onSurfaceVariant
+                                            else MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        val legTime = if (leg.scheduledDepartureEpochMs > 0L) {
+                                            val c = Calendar.getInstance().apply { timeInMillis = leg.scheduledDepartureEpochMs }
+                                            "%02d:%02d · ${leg.durationMinutes} min".format(
+                                                c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE)
+                                            )
+                                        } else "${leg.durationMinutes} min"
+                                        Text(
+                                            legTime,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 10.sp,
+                                        )
+                                    }
+                                    if (isCurrent) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                        ) {
+                                            Text(
+                                                "NOW",
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 9.sp,
+                                            )
+                                        }
+                                    } else if (isDone) {
+                                        Icon(
+                                            Icons.Filled.CheckCircle,
+                                            null,
+                                            tint = StatusGood,
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Near-destination banner ───────────────────────────────────────
+        // Celebrates when the user's GPS is within ~500 m of the journey's
+        // final station. Uses haversine against the already-active journey
+        // route so we don't spam the banner when idle.
+        uiState.journeyRoute?.let { route ->
+            val userLat = uiState.userLat
+            val userLng = uiState.userLng
+            if (userLat != null && userLng != null && progressFraction != null && progressFraction in 0f..1f) {
+                val distKm = haversineKm(userLat, userLng, route.toStation.latitude, route.toStation.longitude)
+                if (distKm < 0.5) {
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .statusBarsPadding()
+                            .padding(top = 80.dp, start = 16.dp, end = 16.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = StatusGood,
+                        shadowElevation = 8.dp,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Filled.CheckCircle, null,
+                                tint = Color.White, modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    "Almost there!",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                )
+                                Text(
+                                    "${(distKm * 1000).toInt()} m to ${route.toStation.name}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White.copy(alpha = 0.9f),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1363,7 +1568,10 @@ fun MapScreen(
             verticalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
             SmallFloatingActionButton(
-                onClick = { showMapStylePicker = !showMapStylePicker },
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    showMapStylePicker = !showMapStylePicker
+                },
                 containerColor = MaterialTheme.colorScheme.surface,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
             ) {
@@ -1377,6 +1585,7 @@ fun MapScreen(
             SmallFloatingActionButton(
                 onClick = {
                     val route = uiState.journeyRoute
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     val userLat = uiState.userLat; val userLng = uiState.userLng
                     val nextMode = (recenterMode + 1) % 3
                     recenterMode = nextMode
@@ -1437,7 +1646,10 @@ fun MapScreen(
             // Phase D: follow-mode toggle. When active, camera re-centers on user each time
             // their GPS moves.
             SmallFloatingActionButton(
-                onClick = { followMode = !followMode },
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    followMode = !followMode
+                },
                 containerColor = if (followMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
             ) {
@@ -1451,7 +1663,10 @@ fun MapScreen(
 
             // Traffic layer toggle — overlays live Google traffic colours.
             SmallFloatingActionButton(
-                onClick = { trafficEnabled = !trafficEnabled },
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    trafficEnabled = !trafficEnabled
+                },
                 containerColor = if (trafficEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
             ) {
@@ -1466,7 +1681,10 @@ fun MapScreen(
             // 3D tilt toggle — slants the camera to a 55° perspective for the
             // dramatic Google-Maps-3D look.
             SmallFloatingActionButton(
-                onClick = { tilt3dEnabled = !tilt3dEnabled },
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    tilt3dEnabled = !tilt3dEnabled
+                },
                 containerColor = if (tilt3dEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
             ) {

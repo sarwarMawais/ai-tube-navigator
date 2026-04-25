@@ -121,7 +121,9 @@ data class StatusUiState(
     val lastUpdated: String? = null,
     val isLiveConnection: Boolean = false,
     val isUsingCachedData: Boolean = false,
-    val expandedCards: Set<String> = emptySet(),
+    // Single-expand accordion — only one line card is open at a time. Tapping
+    // another card auto-collapses the previous one. `null` = everything closed.
+    val expandedLineId: String? = null,
     // Predicted delay minutes per tube line id (from ML engine).
     val delayPredictions: Map<String, Int> = emptyMap(),
     // Contextual AI insights surfacing commute impact, peak hour tips, etc.
@@ -267,9 +269,9 @@ class StatusViewModel @Inject constructor(
     // ── Card Expand / Favourite ─────────────────────────
 
     fun toggleCardExpansion(lineId: String) {
-        val current = _uiState.value.expandedCards
+        val currentlyOpen = _uiState.value.expandedLineId
         _uiState.value = _uiState.value.copy(
-            expandedCards = if (lineId in current) current - lineId else current + lineId
+            expandedLineId = if (currentlyOpen == lineId) null else lineId,
         )
     }
 

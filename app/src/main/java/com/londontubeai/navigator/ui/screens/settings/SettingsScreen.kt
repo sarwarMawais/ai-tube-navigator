@@ -577,7 +577,7 @@ fun SettingsScreen(
                         value = "",
                         onClick = {
                             val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                data = Uri.parse("mailto:feedback@aitubenavigator.app")
+                                data = Uri.parse("mailto:londontubenavigator@gmail.com")
                                 putExtra(Intent.EXTRA_SUBJECT, "AI Tube Navigator feedback")
                             }
                             runCatching { context.startActivity(Intent.createChooser(intent, "Send feedback")) }
@@ -601,7 +601,7 @@ fun SettingsScreen(
                                 append("App: ").append(context.packageName).append("\n")
                             }
                             val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                data = Uri.parse("mailto:bugs@aitubenavigator.app")
+                                data = Uri.parse("mailto:londontubenavigator@gmail.com")
                                 putExtra(Intent.EXTRA_SUBJECT, "AI Tube Navigator bug report")
                                 putExtra(Intent.EXTRA_TEXT, body)
                             }

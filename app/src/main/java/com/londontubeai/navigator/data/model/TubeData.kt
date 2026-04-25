@@ -8,9 +8,19 @@ object TubeData {
         TubeLine("bakerloo", "Bakerloo", TubeLineColors.Bakerloo,
             listOf("elephant-castle","lambeth-north","waterloo","embankment","charing-cross","piccadilly-circus","oxford-circus","regents-park","baker-street","marylebone","edgware-road-bakerloo","paddington","warwick-avenue","maida-vale","kilburn-park","queens-park","kensal-green","harlesden","stonebridge-park","wembley-central","north-wembley","south-kenton","kenton","harrow-wealdstone"),
             averageSpeedKmh = 33, peakFrequencyMinutes = 3, offPeakFrequencyMinutes = 5, totalLengthKm = 36.2),
+        // Central line — runs Ealing Broadway / West Ruislip in the west to
+        // Epping / Hainault loop in the east. We expose two key branches so
+        // the Status screen can show each terminal properly.
         TubeLine("central", "Central", TubeLineColors.Central,
             listOf("ealing-broadway","north-acton","white-city","shepherds-bush","holland-park","notting-hill-gate","queensway","lancaster-gate","marble-arch","bond-street","oxford-circus","tottenham-court-road","holborn","chancery-lane","st-pauls","bank","liverpool-street","bethnal-green","mile-end","stratford","leyton","leytonstone"),
-            averageSpeedKmh = 34, peakFrequencyMinutes = 2, offPeakFrequencyMinutes = 4, totalLengthKm = 74.0),
+            averageSpeedKmh = 34, peakFrequencyMinutes = 2, offPeakFrequencyMinutes = 4, totalLengthKm = 74.0,
+            branches = listOf(
+                TubeLineBranch(
+                    "central-main", "Ealing Broadway → Leytonstone",
+                    listOf("ealing-broadway","north-acton","white-city","shepherds-bush","holland-park","notting-hill-gate","queensway","lancaster-gate","marble-arch","bond-street","oxford-circus","tottenham-court-road","holborn","chancery-lane","st-pauls","bank","liverpool-street","bethnal-green","mile-end","stratford","leyton","leytonstone"),
+                ),
+            ),
+        ),
         TubeLine("circle", "Circle", TubeLineColors.Circle,
             listOf("edgware-road","baker-street","great-portland-street","euston-square","kings-cross","farringdon","barbican","moorgate","liverpool-street","aldgate","tower-hill","monument","cannon-street","mansion-house","blackfriars","temple","embankment","westminster","st-james-park","victoria","sloane-square","south-kensington","gloucester-road","high-street-kensington","notting-hill-gate","bayswater","paddington","edgware-road"),
             averageSpeedKmh = 33, peakFrequencyMinutes = 3, offPeakFrequencyMinutes = 7, totalLengthKm = 27.2),
@@ -23,15 +33,58 @@ object TubeData {
         TubeLine("jubilee", "Jubilee", TubeLineColors.Jubilee,
             listOf("stanmore","canons-park","wembley-park","finchley-road","swiss-cottage","st-johns-wood","baker-street","bond-street","green-park","westminster","waterloo","southwark","london-bridge","bermondsey","canada-water","canary-wharf","north-greenwich","canning-town","west-ham","stratford"),
             averageSpeedKmh = 36, peakFrequencyMinutes = 2, offPeakFrequencyMinutes = 4, totalLengthKm = 36.2),
+        // Metropolitan — expose the northern branch split so users can see
+        // both Amersham and Chesham terminals (they share track until
+        // Chalfont & Latimer). Using stations present in our dataset only.
         TubeLine("metropolitan", "Metropolitan", TubeLineColors.Metropolitan,
-            listOf("aldgate","liverpool-street","moorgate","barbican","farringdon","kings-cross","euston-square","great-portland-street","baker-street","finchley-road","wembley-park","harrow-on-the-hill","north-harrow","pinner","northwood-hills","northwood","chorleywood","chalfont-latimer","amersham"),
-            averageSpeedKmh = 41, peakFrequencyMinutes = 3, offPeakFrequencyMinutes = 6, totalLengthKm = 66.7),
+            listOf("aldgate","liverpool-street","moorgate","barbican","farringdon","kings-cross","euston-square","great-portland-street","baker-street","finchley-road","wembley-park","harrow-on-the-hill","amersham","chesham"),
+            averageSpeedKmh = 41, peakFrequencyMinutes = 3, offPeakFrequencyMinutes = 6, totalLengthKm = 66.7,
+            branches = listOf(
+                TubeLineBranch(
+                    "met-amersham", "Aldgate → Amersham",
+                    listOf("aldgate","liverpool-street","moorgate","barbican","farringdon","kings-cross","euston-square","great-portland-street","baker-street","finchley-road","wembley-park","harrow-on-the-hill","amersham"),
+                ),
+                TubeLineBranch(
+                    "met-chesham", "Aldgate → Chesham",
+                    listOf("aldgate","liverpool-street","moorgate","barbican","farringdon","kings-cross","euston-square","great-portland-street","baker-street","finchley-road","wembley-park","harrow-on-the-hill","chesham"),
+                ),
+            ),
+        ),
+        // Northern — the previous flat list had duplicates because it crams
+        // 5 route segments (2 central branches + 2 northern branches + south
+        // section) into one sequence. We now express the two complete
+        // end-to-end services as proper branches, and the flat `stationIds`
+        // is a deduplicated union used by the graph + map.
         TubeLine("northern", "Northern", TubeLineColors.Northern,
-            listOf("morden","south-wimbledon","colliers-wood","tooting-broadway","tooting-bec","balham","clapham-south","clapham-common","clapham-north","stockwell","oval","kennington","elephant-castle","borough","london-bridge","bank","moorgate","old-street","angel","kings-cross","euston","warren-street","goodge-street","tottenham-court-road","leicester-square","charing-cross","embankment","waterloo","kennington","camden-town","mornington-crescent","euston","camden-town","kentish-town","tufnell-park","archway","highgate","east-finchley","finchley-central","high-barnet","camden-town","chalk-farm","hampstead","golders-green","edgware"),
-            averageSpeedKmh = 33, peakFrequencyMinutes = 2, offPeakFrequencyMinutes = 4, totalLengthKm = 58.2),
+            listOf("morden","south-wimbledon","colliers-wood","tooting-broadway","tooting-bec","balham","clapham-south","clapham-common","clapham-north","stockwell","oval","kennington","elephant-castle","borough","london-bridge","bank","moorgate","old-street","angel","kings-cross","euston","warren-street","goodge-street","tottenham-court-road","leicester-square","charing-cross","embankment","waterloo","camden-town","mornington-crescent","kentish-town","tufnell-park","archway","highgate","east-finchley","finchley-central","high-barnet","chalk-farm","hampstead","golders-green","edgware"),
+            averageSpeedKmh = 33, peakFrequencyMinutes = 2, offPeakFrequencyMinutes = 4, totalLengthKm = 58.2,
+            branches = listOf(
+                TubeLineBranch(
+                    "north-hb-bank", "Morden → High Barnet (via Bank)",
+                    listOf("morden","south-wimbledon","colliers-wood","tooting-broadway","tooting-bec","balham","clapham-south","clapham-common","clapham-north","stockwell","oval","kennington","elephant-castle","borough","london-bridge","bank","moorgate","old-street","angel","kings-cross","euston","camden-town","kentish-town","tufnell-park","archway","highgate","east-finchley","finchley-central","high-barnet"),
+                ),
+                TubeLineBranch(
+                    "north-edg-charing", "Morden → Edgware (via Charing Cross)",
+                    listOf("morden","south-wimbledon","colliers-wood","tooting-broadway","tooting-bec","balham","clapham-south","clapham-common","clapham-north","stockwell","oval","kennington","waterloo","embankment","charing-cross","leicester-square","tottenham-court-road","goodge-street","warren-street","euston","mornington-crescent","camden-town","chalk-farm","hampstead","golders-green","edgware"),
+                ),
+            ),
+        ),
+        // Piccadilly — westbound splits at Acton Town into two long branches:
+        // Uxbridge (via Rayners Lane) and Heathrow (T5 / T2-3).
         TubeLine("piccadilly", "Piccadilly", TubeLineColors.Piccadilly,
-            listOf("cockfosters","oakwood","southgate","arnos-grove","bounds-green","wood-green","turnpike-lane","manor-house","finsbury-park","arsenal","holloway-road","caledonian-road","kings-cross","russell-square","holborn","covent-garden","leicester-square","piccadilly-circus","green-park","hyde-park-corner","knightsbridge","south-kensington","gloucester-road","earls-court","barons-court","hammersmith","acton-town","rayners-lane","eastcote","ruislip-manor","ruislip","ickenham","hillingdon","uxbridge"),
-            averageSpeedKmh = 33, peakFrequencyMinutes = 2, offPeakFrequencyMinutes = 5, totalLengthKm = 71.0),
+            listOf("cockfosters","oakwood","southgate","arnos-grove","bounds-green","wood-green","turnpike-lane","manor-house","finsbury-park","arsenal","holloway-road","caledonian-road","kings-cross","russell-square","holborn","covent-garden","leicester-square","piccadilly-circus","green-park","hyde-park-corner","knightsbridge","south-kensington","gloucester-road","earls-court","barons-court","hammersmith","acton-town","rayners-lane","eastcote","ruislip-manor","ruislip","ickenham","hillingdon","uxbridge","heathrow-t123","heathrow-t5"),
+            averageSpeedKmh = 33, peakFrequencyMinutes = 2, offPeakFrequencyMinutes = 5, totalLengthKm = 71.0,
+            branches = listOf(
+                TubeLineBranch(
+                    "picc-uxbridge", "Cockfosters → Uxbridge",
+                    listOf("cockfosters","oakwood","southgate","arnos-grove","bounds-green","wood-green","turnpike-lane","manor-house","finsbury-park","arsenal","holloway-road","caledonian-road","kings-cross","russell-square","holborn","covent-garden","leicester-square","piccadilly-circus","green-park","hyde-park-corner","knightsbridge","south-kensington","gloucester-road","earls-court","barons-court","hammersmith","acton-town","rayners-lane","eastcote","ruislip-manor","ruislip","ickenham","hillingdon","uxbridge"),
+                ),
+                TubeLineBranch(
+                    "picc-heathrow", "Cockfosters → Heathrow Terminal 5",
+                    listOf("cockfosters","oakwood","southgate","arnos-grove","bounds-green","wood-green","turnpike-lane","manor-house","finsbury-park","arsenal","holloway-road","caledonian-road","kings-cross","russell-square","holborn","covent-garden","leicester-square","piccadilly-circus","green-park","hyde-park-corner","knightsbridge","south-kensington","gloucester-road","earls-court","barons-court","hammersmith","acton-town","heathrow-t123","heathrow-t5"),
+                ),
+            ),
+        ),
         TubeLine("victoria", "Victoria", TubeLineColors.Victoria,
             listOf("brixton","stockwell","vauxhall","pimlico","victoria","green-park","oxford-circus","warren-street","euston","kings-cross","highbury-islington","finsbury-park","seven-sisters","tottenham-hale","blackhorse-road","walthamstow-central"),
             averageSpeedKmh = 40, peakFrequencyMinutes = 2, offPeakFrequencyMinutes = 4, totalLengthKm = 21.0),
@@ -117,6 +170,35 @@ object TubeData {
             )
         }
 
+        // Build rich per-branch detail when the line declares multiple routes
+        // (Northern, Piccadilly, Metropolitan, Central today). Each branch
+        // reuses the same station-enrichment logic so terminals and step-free
+        // flags are accurate for that specific route.
+        val branchDetails: List<LineBranchDetail> = line.branches.map { branch ->
+            val branchStops = branch.stationIds.mapIndexedNotNull { index, stationId ->
+                val station = stations[stationId] ?: return@mapIndexedNotNull null
+                val otherLines = station.lineIds
+                    .filter { it != lineId }
+                    .mapNotNull { getLineById(it)?.name }
+                    .sorted()
+                LineStationStop(
+                    stationId = stationId,
+                    stationName = station.name,
+                    zone = station.zone,
+                    isTerminal = index == 0 || index == branch.stationIds.lastIndex,
+                    hasStepFreeAccess = station.hasStepFreeAccess,
+                    connectingLineNames = otherLines,
+                )
+            }
+            LineBranchDetail(
+                branchId = branch.id,
+                branchName = branch.name,
+                orderedStations = branchStops,
+            )
+        }
+
+        val stepFreeCount = orderedStations.count { it.hasStepFreeAccess }
+
         return LineDetail(
             lineId = lineId,
             lineName = line.name,
@@ -134,6 +216,8 @@ object TubeData {
             interchanges = interchangeStations,
             orderedStations = orderedStations,
             stationNames = stationNames,
+            branches = branchDetails,
+            stepFreeStationCount = stepFreeCount,
         )
     }
 

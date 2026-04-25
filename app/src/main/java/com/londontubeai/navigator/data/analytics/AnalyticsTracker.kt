@@ -1,12 +1,18 @@
 package com.londontubeai.navigator.data.analytics
 
+import android.os.Bundle
 import android.util.Log
+import com.google.firebase.analytics.FirebaseAnalytics
+import com.google.firebase.crashlytics.FirebaseCrashlytics
+import com.londontubeai.navigator.data.preferences.AppPreferences
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 
 /**
  * Analytics tracker for measuring real impact of AI features.
- * In production, replace Log calls with Firebase Analytics / Mixpanel / Amplitude.
+ * Uses Firebase Analytics for production tracking.
  *
  * Tracks:
  * - Time saved per journey (carriage recommendation effectiveness)
@@ -16,10 +22,40 @@ import javax.inject.Singleton
  * - Session metrics
  */
 @Singleton
-class AnalyticsTracker @Inject constructor() {
+class AnalyticsTracker @Inject constructor(
+    private val firebaseAnalytics: FirebaseAnalytics,
+    private val crashlytics: FirebaseCrashlytics,
+    private val preferences: AppPreferences,
+) {
 
     companion object {
         private const val TAG = "TubeAnalytics"
+    }
+
+    private var analyticsEnabled: Boolean = true
+    private var crashReportsEnabled: Boolean = true
+
+    init {
+        runBlocking {
+            analyticsEnabled = preferences.analyticsEnabled.first()
+            crashReportsEnabled = preferences.crashReportsEnabled.first()
+        }
+        firebaseAnalytics.setAnalyticsCollectionEnabled(analyticsEnabled)
+        updateCrashlyticsCollection()
+    }
+
+    fun updateAnalyticsSettings(enabled: Boolean) {
+        analyticsEnabled = enabled
+        firebaseAnalytics.setAnalyticsCollectionEnabled(enabled)
+    }
+
+    fun updateCrashlyticsSettings(enabled: Boolean) {
+        crashReportsEnabled = enabled
+        updateCrashlyticsCollection()
+    }
+
+    private fun updateCrashlyticsCollection() {
+        crashlytics.setCrashlyticsCollectionEnabled(crashReportsEnabled)
     }
 
     // ── Journey Analytics ────────────────────────────────────
@@ -116,7 +152,22 @@ class AnalyticsTracker @Inject constructor() {
     // ── Internal ─────────────────────────────────────────────
 
     private fun log(event: String, params: Map<String, Any>) {
-        // In production: firebaseAnalytics.logEvent(event, bundle)
+        if (analyticsEnabled) {
+            val bundle = Bundle().apply {
+                params.forEach { (key, value) ->
+                    when (value) {
+                        is String -> putString(key, value)
+                        is Int -> putInt(key, value)
+                        is Long -> putLong(key, value)
+                        is Float -> putFloat(key, value)
+                        is Double -> putDouble(key, value)
+                        is Boolean -> putBoolean(key, value)
+                    }
+                }
+            }
+            firebaseAnalytics.logEvent(event, bundle)
+        }
+        // Always log locally for debugging
         Log.d(TAG, "EVENT: $event | ${params.entries.joinToString(", ") { "${it.key}=${it.value}" }}")
     }
 }

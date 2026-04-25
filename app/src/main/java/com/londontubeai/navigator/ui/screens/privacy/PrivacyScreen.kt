@@ -1,6 +1,11 @@
 package com.londontubeai.navigator.ui.screens.privacy
 
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,12 +17,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChildCare
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Gavel
@@ -28,7 +39,11 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Policy
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Update
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -36,20 +51,56 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.londontubeai.navigator.ui.theme.Spacing
 import com.londontubeai.navigator.ui.theme.StatusGood
+import com.londontubeai.navigator.ui.theme.StatusSevere
+import com.londontubeai.navigator.ui.theme.TubeAccent
 import com.londontubeai.navigator.ui.theme.TubePrimary
+import kotlinx.coroutines.launch
 
 @Composable
-fun PrivacyScreen(onBack: () -> Unit = {}) {
+fun PrivacyScreen(
+    onBack: () -> Unit = {},
+    viewModel: PrivacyViewModel = hiltViewModel(),
+) {
+    val analyticsEnabled by viewModel.analyticsEnabled.collectAsState(initial = false)
+    val crashReportsEnabled by viewModel.crashReportsEnabled.collectAsState(initial = false)
+    val personalisationEnabled by viewModel.personalisationEnabled.collectAsState(initial = true)
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var deleteConfirmed by remember { mutableStateOf(false) }
+    LaunchedEffect(deleteConfirmed) {
+        if (deleteConfirmed) {
+            android.widget.Toast.makeText(
+                context,
+                "All local data erased",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+            deleteConfirmed = false
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -74,6 +125,69 @@ fun PrivacyScreen(onBack: () -> Unit = {}) {
             contentPadding = PaddingValues(horizontal = Spacing.xl, vertical = Spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Spacing.xs),
         ) {
+            // ── Reading-time estimate ──────────────────────────
+            item {
+                Text(
+                    "⏱ 4 minute read",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = Spacing.md),
+                )
+            }
+
+            // ── TL;DR card — plain English summary ─────────────
+            // Gives users the 15-second version of the policy so the
+            // legal detail below is reassurance rather than homework.
+            item { TldrCard() }
+            item { Spacer(modifier = Modifier.height(Spacing.md)) }
+
+            // ── Action buttons — export / delete / open online ─
+            item {
+                PrivacyActionsRow(
+                    onExport = {
+                        scope.launch {
+                            val json = viewModel.exportAsJson(
+                                currentAnalytics = analyticsEnabled,
+                                currentCrashReports = crashReportsEnabled,
+                                currentPersonalisation = personalisationEnabled,
+                            )
+                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/json"
+                                putExtra(Intent.EXTRA_SUBJECT, "My AI Tube Navigator data")
+                                putExtra(Intent.EXTRA_TEXT, json)
+                            }
+                            runCatching {
+                                context.startActivity(
+                                    Intent.createChooser(sendIntent, "Export my data"),
+                                )
+                            }
+                        }
+                    },
+                    onDelete = { showDeleteDialog = true },
+                    onOpenOnline = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse("https://aitubenavigator.app/privacy")),
+                            )
+                        }
+                    },
+                )
+            }
+            item { Spacer(modifier = Modifier.height(Spacing.md)) }
+
+            // ── Opt-out toggles ────────────────────────────────
+            item {
+                OptOutToggles(
+                    analytics = analyticsEnabled,
+                    crashReports = crashReportsEnabled,
+                    personalisation = personalisationEnabled,
+                    onAnalyticsChange = { scope.launch { viewModel.setAnalytics(it) } },
+                    onCrashReportsChange = { scope.launch { viewModel.setCrashReports(it) } },
+                    onPersonalisationChange = { scope.launch { viewModel.setPersonalisation(it) } },
+                )
+            }
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
             item {
                 Text(
                     text = "Privacy Policy",
@@ -203,7 +317,7 @@ fun PrivacyScreen(onBack: () -> Unit = {}) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                         Spacer(modifier = Modifier.height(Spacing.sm))
                         Text(
-                            text = "Contact: privacy@aitubenavigator.app",
+                            text = "Contact: londontubenavigator@gmail.com",
                             style = MaterialTheme.typography.labelMedium,
                             color = TubePrimary,
                             fontWeight = FontWeight.SemiBold,
@@ -222,6 +336,192 @@ fun PrivacyScreen(onBack: () -> Unit = {}) {
                 Spacer(modifier = Modifier.height(Spacing.xxxl))
             }
         }
+    }
+
+    // ── Delete confirmation dialog ─────────────────────────
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            icon = { Icon(Icons.Filled.DeleteForever, null, tint = StatusSevere) },
+            title = { Text("Delete all data?") },
+            text = {
+                Text(
+                    "This will permanently erase:\n" +
+                        "• All saved routes\n" +
+                        "• Favourite stations\n" +
+                        "• Preferences & settings\n" +
+                        "• Recent searches\n\n" +
+                        "This action cannot be undone.",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            viewModel.deleteAll()
+                            deleteConfirmed = true
+                            showDeleteDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusSevere),
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+}
+
+// ─── TL;DR card ───────────────────────────────────────────────────────────
+@Composable
+private fun TldrCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = StatusGood.copy(alpha = 0.08f)),
+    ) {
+        Column(modifier = Modifier.padding(Spacing.md)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.CheckCircle, null, tint = StatusGood, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "TL;DR",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = StatusGood,
+                )
+            }
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            Text(
+                text = "We store everything locally on your device. We don't collect your name, email, contacts, or payment details. " +
+                    "Location is processed on-device and never stored on our servers. " +
+                    "You can export or delete your data at any time using the buttons below.",
+                style = MaterialTheme.typography.bodySmall,
+                lineHeight = 18.sp,
+            )
+        }
+    }
+}
+
+// ─── Action buttons row ────────────────────────────────────────────────────
+@Composable
+private fun PrivacyActionsRow(
+    onExport: () -> Unit,
+    onDelete: () -> Unit,
+    onOpenOnline: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        ActionChip(Icons.Filled.CloudDownload, "Export", TubePrimary, onExport, Modifier.weight(1f))
+        ActionChip(Icons.Filled.DeleteForever, "Delete all", StatusSevere, onDelete, Modifier.weight(1f))
+        ActionChip(Icons.AutoMirrored.Filled.OpenInNew, "Online", TubeAccent, onOpenOnline, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun ActionChip(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.height(44.dp).clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = tint.copy(alpha = 0.1f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = tint)
+        }
+    }
+}
+
+// ─── Opt-out toggles ──────────────────────────────────────────────────────
+@Composable
+private fun OptOutToggles(
+    analytics: Boolean,
+    crashReports: Boolean,
+    personalisation: Boolean,
+    onAnalyticsChange: (Boolean) -> Unit,
+    onCrashReportsChange: (Boolean) -> Unit,
+    onPersonalisationChange: (Boolean) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+    ) {
+        Column(modifier = Modifier.padding(Spacing.md)) {
+            Text(
+                "Data-sharing preferences",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            ToggleRow(
+                icon = Icons.Filled.Analytics,
+                label = "Anonymous analytics",
+                description = "Help us improve the app (no personal data)",
+                checked = analytics,
+                onCheckedChange = onAnalyticsChange,
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = Spacing.xs))
+            ToggleRow(
+                icon = Icons.Filled.BugReport,
+                label = "Crash reports",
+                description = "Send anonymous crash logs to help fix bugs",
+                checked = crashReports,
+                onCheckedChange = onCrashReportsChange,
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = Spacing.xs))
+            ToggleRow(
+                icon = Icons.Filled.Tune,
+                label = "Personalisation",
+                description = "Learn your commute habits to suggest better routes",
+                checked = personalisation,
+                onCheckedChange = onPersonalisationChange,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    icon: ImageVector,
+    label: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = TubePrimary, modifier = Modifier.size(16.dp))
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

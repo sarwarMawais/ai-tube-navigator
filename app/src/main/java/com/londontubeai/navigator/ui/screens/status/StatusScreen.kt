@@ -93,7 +93,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.content.Intent
+import androidx.compose.material.icons.filled.Accessible
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import com.londontubeai.navigator.data.model.AiInsight
+import com.londontubeai.navigator.data.model.LineBranchDetail
 import com.londontubeai.navigator.data.model.LineDetail
 import com.londontubeai.navigator.data.model.LineStationStop
 import com.londontubeai.navigator.data.model.LineStatus
@@ -212,7 +219,7 @@ fun StatusScreen(viewModel: StatusViewModel = hiltViewModel()) {
                             itemsIndexed(disruptedStatuses, key = { _, s -> "d_${s.status.lineId}" }) { _, status ->
                                 LineStatusCard(
                                     uiModel = status,
-                                    isExpanded = status.status.lineId in uiState.expandedCards,
+                                    isExpanded = status.status.lineId == uiState.expandedLineId,
                                     onToggleExpand = { viewModel.toggleCardExpansion(status.status.lineId) },
                                     onToggleFavourite = { viewModel.toggleFavourite(status.status.lineId) },
                                     modifier = Modifier
@@ -233,7 +240,7 @@ fun StatusScreen(viewModel: StatusViewModel = hiltViewModel()) {
                             itemsIndexed(goodStatuses, key = { _, s -> "g_${s.status.lineId}" }) { _, status ->
                                 LineStatusCard(
                                     uiModel = status,
-                                    isExpanded = status.status.lineId in uiState.expandedCards,
+                                    isExpanded = status.status.lineId == uiState.expandedLineId,
                                     onToggleExpand = { viewModel.toggleCardExpansion(status.status.lineId) },
                                     onToggleFavourite = { viewModel.toggleFavourite(status.status.lineId) },
                                     modifier = Modifier
@@ -734,6 +741,11 @@ private fun LineStatusCard(
         status.lineColor == TubeLineColors.WaterlooCity
     ) Color.Black else Color.White
     var showAllStations by remember { mutableStateOf(false) }
+    // Branch picker index — defaults to the first branch when the line has
+    // multiple routes (e.g. Northern: via-Bank vs via-Charing-Cross).
+    var selectedBranchIndex by remember(status.lineId) { mutableStateOf(0) }
+    val haptics = LocalHapticFeedback.current
+    val context = LocalContext.current
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -750,7 +762,10 @@ private fun LineStatusCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onToggleExpand() }
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onToggleExpand()
+                    }
                     .padding(horizontal = 14.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1003,6 +1018,33 @@ private fun LineStatusCard(
                                     modifier = Modifier.weight(1f),
                                 )
                             }
+                            // Accessibility pill — surfaces step-free station coverage
+                            // which is critical info for wheelchair users and buggies.
+                            if (lineDetail.stepFreeStationCount > 0) {
+                                Spacer(Modifier.height(8.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = StatusGood.copy(alpha = 0.12f),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Accessible, null,
+                                            tint = StatusGood, modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            "${lineDetail.stepFreeStationCount} of ${lineDetail.stationCount} stations are step-free",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = StatusGood,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         // CONNECTS WITH section
@@ -1057,9 +1099,132 @@ private fun LineStatusCard(
                                     .padding(horizontal = 4.dp, vertical = 8.dp)
                                     .padding(bottom = 8.dp),
                             ) {
+                                // Branch picker — only rendered when the line has
+                                // 2+ routes. Clicking a chip swaps the station list
+                                // in-place so users can inspect each terminal.
+                                if (lineDetail.branches.size >= 2) {
+                                    Text(
+                                        "ROUTES",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        letterSpacing = 0.8.sp,
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        lineDetail.branches.forEachIndexed { idx, branch ->
+                                            val selected = idx == selectedBranchIndex
+                                            Surface(
+                                                modifier = Modifier.clickable {
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    selectedBranchIndex = idx
+                                                },
+                                                shape = RoundedCornerShape(999.dp),
+                                                color = if (selected) status.lineColor.copy(alpha = 0.18f)
+                                                        else MaterialTheme.colorScheme.surfaceVariant,
+                                                border = if (selected) androidx.compose.foundation.BorderStroke(
+                                                    1.5.dp, status.lineColor,
+                                                ) else null,
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Box(
+                                                        Modifier.size(8.dp).clip(CircleShape).background(status.lineColor),
+                                                    )
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text(
+                                                        branch.branchName,
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (selected) status.lineColor
+                                                                else MaterialTheme.colorScheme.onSurface,
+                                                    )
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text(
+                                                        "${branch.orderedStations.size}",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.height(12.dp))
+                                }
+
+                                // Render either the selected branch's stations or
+                                // fall back to the full flat list.
+                                val stationsToShow: List<LineStationStop> =
+                                    if (lineDetail.branches.size >= 2) {
+                                        lineDetail.branches
+                                            .getOrNull(selectedBranchIndex)
+                                            ?.orderedStations
+                                            ?: lineDetail.orderedStations
+                                    } else lineDetail.orderedStations
+
                                 OrderedStationsHierarchy(
-                                    stations = lineDetail.orderedStations,
+                                    stations = stationsToShow,
                                     lineColor = status.lineColor,
+                                )
+                            }
+                        }
+
+                        // Share status — lets users quickly forward the current
+                        // line state to colleagues or family via any share target
+                        // (Messages, WhatsApp, email, etc.). Modern expectation.
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    val body = buildString {
+                                        append("🚇 ${status.lineName} line — ")
+                                        append(if (status.isGoodService) "Good service" else uiModel.statusBadge)
+                                        status.reason?.takeIf { it.isNotBlank() }?.let {
+                                            append("\n\n$it")
+                                        }
+                                        append("\n\nShared from AI Tube Navigator")
+                                    }
+                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, "${status.lineName} line status")
+                                        putExtra(Intent.EXTRA_TEXT, body)
+                                    }
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent.createChooser(sendIntent, "Share line status")
+                                        )
+                                    }
+                                }
+                                .padding(bottom = 8.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Filled.Share, null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Share status",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }

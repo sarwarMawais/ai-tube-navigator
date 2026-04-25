@@ -13,6 +13,21 @@ data class TubeLine(
     val firstTrain: String = "05:30",
     val lastTrain: String = "00:30",
     val totalLengthKm: Double = 0.0,
+    /**
+     * Real London Underground lines often have multiple routes — e.g. Northern
+     * runs two central sections (Charing Cross / Bank) plus a split at Camden
+     * into Edgware and High Barnet branches. When this is set, the Status screen
+     * shows a branch picker so users can inspect each route's stations in the
+     * correct geographic order (fixes duplicates seen in flat lists).
+     */
+    val branches: List<TubeLineBranch> = emptyList(),
+)
+
+/** One named route through a tube line (e.g. "Edgware via Charing Cross"). */
+data class TubeLineBranch(
+    val id: String,
+    val name: String,
+    val stationIds: List<String>,
 )
 
 data class Station(
@@ -102,6 +117,17 @@ data class LineDetail(
     val interchanges: List<InterchangeInfo>,
     val orderedStations: List<LineStationStop>,
     val stationNames: List<String>,
+    /** Ordered per-branch station lists. Empty if the line is a single route. */
+    val branches: List<LineBranchDetail> = emptyList(),
+    /** Count of stations with step-free access along the primary route. */
+    val stepFreeStationCount: Int = 0,
+)
+
+/** Ordered station list for one named branch of a tube line. */
+data class LineBranchDetail(
+    val branchId: String,
+    val branchName: String,
+    val orderedStations: List<LineStationStop>,
 )
 
 data class ConnectingLine(

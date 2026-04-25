@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "389795867537",
+    "project_id": "london-tube-ai",
+    "storage_bucket": "london-tube-ai.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:389795867537:android:4e8cd39a53a8841f4fc830",
+        "android_client_info": {
+          "package_name": "com.londontubeai.navigator"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyApnVW05cuVGZ8754PgexidOQxmjQ7d9IU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

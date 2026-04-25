@@ -257,6 +257,12 @@ fun AppNavigation(
                     )
                 }
 
+                composable(Screen.Licenses.route) {
+                    LicensesScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+
                 composable(Screen.NearbyDetail.route) {
                     NearbyDetailScreen(
                         onBack = { navController.popBackStack() },

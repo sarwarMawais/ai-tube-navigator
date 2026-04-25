@@ -45,6 +45,12 @@ class AppPreferences @Inject constructor(
         private val KEY_MAP_STYLE = stringPreferencesKey("map_style")
         private val KEY_MAP_LINE_FILTER = stringPreferencesKey("map_line_filter")
         private val KEY_RECENT_MAP_PLACES = stringPreferencesKey("recent_map_places")
+        // Privacy opt-out toggles (GDPR). Default = off (opt-in explicit).
+        // Even though we don't currently send analytics, we keep these
+        // persisted so the UX promise to users is honoured the moment we do.
+        private val KEY_ANALYTICS_ENABLED = booleanPreferencesKey("privacy_analytics_enabled")
+        private val KEY_CRASH_REPORTS_ENABLED = booleanPreferencesKey("privacy_crash_reports_enabled")
+        private val KEY_PERSONALISATION_ENABLED = booleanPreferencesKey("privacy_personalisation_enabled")
     }
 
     val onboardingComplete: Flow<Boolean> = context.dataStore.data.map { it[KEY_ONBOARDING_COMPLETE] ?: false }
@@ -71,6 +77,19 @@ class AppPreferences @Inject constructor(
     val mapStyle: Flow<String> = context.dataStore.data.map { it[KEY_MAP_STYLE] ?: "NORMAL" }
     val mapLineFilter: Flow<String?> = context.dataStore.data.map { it[KEY_MAP_LINE_FILTER] }
     val recentMapPlaces: Flow<String> = context.dataStore.data.map { it[KEY_RECENT_MAP_PLACES] ?: "" }
+    val analyticsEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_ANALYTICS_ENABLED] ?: false }
+    val crashReportsEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_CRASH_REPORTS_ENABLED] ?: false }
+    val personalisationEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_PERSONALISATION_ENABLED] ?: true }
+
+    suspend fun setAnalyticsEnabled(value: Boolean) {
+        context.dataStore.edit { it[KEY_ANALYTICS_ENABLED] = value }
+    }
+    suspend fun setCrashReportsEnabled(value: Boolean) {
+        context.dataStore.edit { it[KEY_CRASH_REPORTS_ENABLED] = value }
+    }
+    suspend fun setPersonalisationEnabled(value: Boolean) {
+        context.dataStore.edit { it[KEY_PERSONALISATION_ENABLED] = value }
+    }
 
     suspend fun setOnboardingComplete(complete: Boolean) {
         context.dataStore.edit { it[KEY_ONBOARDING_COMPLETE] = complete }
