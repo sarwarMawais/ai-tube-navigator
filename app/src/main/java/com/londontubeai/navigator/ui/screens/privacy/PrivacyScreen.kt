@@ -167,7 +167,7 @@ fun PrivacyScreen(
                     onOpenOnline = {
                         runCatching {
                             context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse("https://aitubenavigator.app/privacy")),
+                                Intent(Intent.ACTION_VIEW, Uri.parse("https://sarwarMawais.github.io/ai-tube-navigator/")),
                             )
                         }
                     },

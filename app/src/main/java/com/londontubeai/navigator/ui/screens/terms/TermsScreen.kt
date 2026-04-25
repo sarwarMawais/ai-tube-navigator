@@ -1,5 +1,7 @@
 package com.londontubeai.navigator.ui.screens.terms
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -61,6 +64,7 @@ import com.londontubeai.navigator.ui.theme.TubePrimary
 fun TermsScreen(onBack: () -> Unit = {}) {
     var searchQuery by remember { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
@@ -87,7 +91,7 @@ fun TermsScreen(onBack: () -> Unit = {}) {
             verticalArrangement = Arrangement.spacedBy(Spacing.xs),
         ) {
             // ── TfL Attribution Banner ──────────────────────────
-            item { TflAttributionBanner() }
+            item { TflAttributionBanner(context) }
 
             // ── Search Field ────────────────────────────────────
             item {
@@ -198,7 +202,7 @@ private fun TermsSection(icon: ImageVector, title: String, description: String) 
 
 // ─── TfL Attribution Banner ─────────────────────────────────────────────────
 @Composable
-private fun TflAttributionBanner() {
+private fun TflAttributionBanner(context: android.content.Context) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -231,7 +235,10 @@ private fun TflAttributionBanner() {
             Spacer(modifier = Modifier.height(Spacing.sm))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable { /* TODO: Open TfL licence URL */ },
+                modifier = Modifier.clickable {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://tfl.gov.uk/info-for/open-data-users/"))
+                    runCatching { context.startActivity(intent) }
+                },
             ) {
                 Icon(
                     Icons.AutoMirrored.Filled.OpenInNew,
