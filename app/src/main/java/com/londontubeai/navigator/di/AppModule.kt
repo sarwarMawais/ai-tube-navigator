@@ -2,6 +2,8 @@ package com.londontubeai.navigator.di
 
 import android.content.Context
 import androidx.room.Room
+import com.google.firebase.analytics.FirebaseAnalytics
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.londontubeai.navigator.BuildConfig
 import com.londontubeai.navigator.data.local.AppDatabase
 import com.londontubeai.navigator.data.local.dao.TubeDao
@@ -104,5 +106,17 @@ object AppModule {
     @Singleton
     fun provideTubeDao(database: AppDatabase): TubeDao {
         return database.tubeDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideFirebaseAnalytics(@ApplicationContext context: Context): FirebaseAnalytics {
+        return FirebaseAnalytics.getInstance(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideFirebaseCrashlytics(): FirebaseCrashlytics {
+        return FirebaseCrashlytics.getInstance()
     }
 }
