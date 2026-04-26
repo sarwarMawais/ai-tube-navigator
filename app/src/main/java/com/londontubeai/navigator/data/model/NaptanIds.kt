@@ -153,7 +153,7 @@ object NaptanIds {
         "high-barnet" to "940GZZLUHBT",
         "morden" to "940GZZLUMDN",
         "south-wimbledon" to "940GZZLUSWN",
-        "stanmore" to "940GZZLUSME",
+        "stanmore" to "940GZZLUSTM",
         "stratford" to "940GZZLUSFD",
         "wembley-park" to "940GZZLUWPP",
 
@@ -174,7 +174,7 @@ object NaptanIds {
         "wembley-central" to "940GZZLUWMC",
         "north-wembley" to "940GZZLUNWY",
         "south-kenton" to "940GZZLUSKT",
-        "kenton" to "940GZZLUKTON",
+        "kenton" to "940GZZLUKEN",
         "harrow-wealdstone" to "940GZZLUHAW",
 
         // Piccadilly outer (Finsbury Park → Cockfosters)

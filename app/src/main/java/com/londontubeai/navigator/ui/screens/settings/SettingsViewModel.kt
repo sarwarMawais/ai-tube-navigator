@@ -15,7 +15,11 @@ import com.londontubeai.navigator.data.notifications.DisruptionCheckWorker
 import com.londontubeai.navigator.data.preferences.AppPreferences
 import com.londontubeai.navigator.ui.appicon.AppIconManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import com.google.gson.GsonBuilder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -192,6 +196,26 @@ class SettingsViewModel @Inject constructor(
 
     suspend fun resetPreferences() {
         prefs.clearAll()
+    }
+
+    suspend fun getExportJson(): String = withContext(Dispatchers.IO) {
+        val prefsMap = prefs.getAllPrefsMap()
+        val journeys = dao.getAllSavedJourneys().first()
+        val data = mapOf(
+            "exported_at" to System.currentTimeMillis(),
+            "app_version" to "1.0.0",
+            "preferences" to prefsMap,
+            "saved_journeys" to journeys,
+        )
+        GsonBuilder().setPrettyPrinting().create().toJson(data)
+    }
+
+    suspend fun deleteAllUserData() {
+        prefs.clearAll()
+        dao.deleteAllJourneys()
+        dao.clearCachedLineStatuses()
+        dao.clearStaleArrivals(Long.MAX_VALUE)
+        dao.clearStaleRoutes(Long.MAX_VALUE)
     }
 
     private data class PartialA(val fastest: Boolean, val crowds: Boolean, val walking: Boolean, val stepFree: Boolean, val disruptions: Boolean)

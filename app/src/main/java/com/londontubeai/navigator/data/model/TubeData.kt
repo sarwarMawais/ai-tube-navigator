@@ -111,10 +111,63 @@ object TubeData {
         val station = stations[stationId] ?: return emptyList()
         return station.lineIds.mapNotNull { lineId -> lines.find { it.id == lineId } }
     }
+    /** Common shorthand / typo aliases → canonical station name fragment. */
+    private val stationAliases: Map<String, String> = mapOf(
+        "kings x" to "king's cross",
+        "kings cross" to "king's cross",
+        "kng cross" to "king's cross",
+        "kingx" to "king's cross",
+        "tcr" to "tottenham court road",
+        "tot court" to "tottenham court road",
+        "oxf circus" to "oxford circus",
+        "picc circus" to "piccadilly circus",
+        "leic sq" to "leicester square",
+        "leicester sq" to "leicester square",
+        "west end" to "tottenham court road",
+        "london br" to "london bridge",
+        "liv street" to "liverpool street",
+        "liverpool st" to "liverpool street",
+        "st pancras" to "king's cross",
+        "vicky" to "victoria",
+        "padd" to "paddington",
+        "waterloo east" to "waterloo",
+        "elephant" to "elephant & castle",
+        "elephant castle" to "elephant & castle",
+        "hammersmith" to "hammersmith",
+        "ldn bridge" to "london bridge",
+        "canary w" to "canary wharf",
+        "canary whf" to "canary wharf",
+        "stratford intl" to "stratford",
+    )
+
+    /** Cheap Levenshtein-style similarity score (0..1). Used only when contains-match fails. */
+    private fun fuzzyMatch(name: String, q: String): Boolean {
+        if (q.length < 3) return false
+        val n = name.lowercase()
+        // Token-level fuzzy: every query token must be a prefix of some word in the name
+        val tokens = q.split(" ", "'").filter { it.isNotBlank() }
+        val nameTokens = n.split(" ", "'", "-").filter { it.isNotBlank() }
+        if (tokens.isEmpty() || nameTokens.isEmpty()) return false
+        return tokens.all { qt -> nameTokens.any { nt -> nt.startsWith(qt) || (qt.length >= 4 && nt.contains(qt.take(qt.length - 1))) } }
+    }
+
     fun searchStations(query: String): List<Station> {
         if (query.isBlank()) return stations.values.toList().sortedBy { it.name }
-        val q = query.lowercase().trim()
-        return stations.values.filter { it.name.lowercase().contains(q) }.sortedBy { it.name }
+        val raw = query.lowercase().trim()
+        // Expand alias if present
+        val q = stationAliases[raw] ?: raw
+        val all = stations.values
+        // Tier 1: exact contains match
+        val contains = all.filter { it.name.lowercase().contains(q) }
+        if (contains.isNotEmpty()) {
+            // Prefer matches where query is at start of a word
+            return contains.sortedWith(
+                compareByDescending<Station> { it.name.lowercase().startsWith(q) }
+                    .thenBy { it.name }
+            )
+        }
+        // Tier 2: fuzzy token match
+        return all.filter { fuzzyMatch(it.name, q) }.sortedBy { it.name }
     }
     fun getAllStationsSorted(): List<Station> = stations.values.sortedBy { it.name }
     fun getNeighbours(stationId: String): List<StationConnection> = adjacencyMap[stationId] ?: emptyList()

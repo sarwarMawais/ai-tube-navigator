@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.londontubeai.navigator.BuildConfig
 import com.londontubeai.navigator.ui.theme.TubeAccent
 import com.londontubeai.navigator.ui.theme.TubePrimary
 import kotlinx.coroutines.delay
@@ -204,6 +205,20 @@ fun AnimatedSplashScreen(
                 PulsingDots()
             }
         }
+
+        // Version tag anchored at the bottom — helps QA + support identify
+        // exactly which build a tester is running.
+        Text(
+            text = "v${BuildConfig.VERSION_NAME}",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = 0.45f * textAlpha),
+            fontSize = 11.sp,
+            letterSpacing = 0.5.sp,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 32.dp)
+                .alpha(textAlpha),
+        )
     }
 }
 

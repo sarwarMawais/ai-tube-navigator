@@ -37,6 +37,9 @@ interface TubeDao {
     @Query("DELETE FROM saved_journeys WHERE isFavourite = 0")
     suspend fun clearNonFavouriteJourneys()
 
+    @Query("DELETE FROM saved_journeys")
+    suspend fun deleteAllJourneys()
+
     // Cached Line Status
     @Query("SELECT * FROM cached_line_status ORDER BY lineName ASC")
     fun getCachedLineStatuses(): Flow<List<CachedLineStatusEntity>>

@@ -621,6 +621,13 @@ class RouteViewModel @Inject constructor(
         return "🚇 AI Tube Navigator\n$from → $to\n⏱ $mins min · $changes change${if (changes != 1) "s" else ""}\nVia: $legs\nPlan your journey: https://aitube.navigator"
     }
 
+    /** Toggle favourite/pinned state of a saved journey in the recents list. */
+    fun togglePinJourney(journey: SavedJourneyEntity) {
+        viewModelScope.launch {
+            repository.toggleFavourite(journey.copy(isFavourite = !journey.isFavourite))
+        }
+    }
+
     fun selectRecentJourney(journey: SavedJourneyEntity) {
         val from = TubeData.getStationById(journey.fromStationId)
             ?: Station(

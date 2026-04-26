@@ -80,6 +80,11 @@ sealed class Screen(
         title = "Welcome",
     )
 
+    data object Consent : Screen(
+        route = "consent",
+        title = "Privacy & Data",
+    )
+
     data object Premium : Screen(
         route = "premium",
         title = "Premium",

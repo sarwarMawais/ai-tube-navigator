@@ -1,35 +1,79 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
     <!--
-        London Underground AI roundel — all white, works on any coloured background.
-        Ring:  outer r=30 (x 24..84), inner r=20 (x 34..74), thickness=10dp
-        Bar:   x 17..91, y 47..61 (h=14), stadium-capped ends
-        "AI":  evenOdd cutouts — background colour shows through as letter colour
-               A: outer triangle M43,61 L48,48 L53,61 + crossbar fill-back M45.5,54 L50.5,54 L50.5,56.5 L45.5,56.5
-               I: rectangle M57,48 L64,48 L64,60 L57,60
+        Premium foreground for AI Tube Navigator.
+        – All visible content stays within the 72×72 safe zone (x:18-90, y:18-90)
+          so launchers can mask, parallax or animate without clipping.
+        – The roundel + bar shape is paired with an "AI sparkle" accent at the
+          top-right; this is the clear visual differentiator vs. TfL's
+          trademarked plain roundel and helps Play Store IP review.
+        – A faint inner gradient on the bar gives a soft glassy depth so the
+          icon reads premium against the gradient background.
+        Geometry:
+          Roundel ring:  outer r=28 (cx,cy=54), inner r=18  → 10-unit ring
+          Bar:           x 19..89, y 47..61 (h=14), stadium ends
+          "AI" cutouts:  cleaner, slightly heavier letterforms
+          Sparkle:       4-point star centred at (78, 26), radius ≈ 6
     -->
+
+    <!-- Glow halo behind the roundel for premium depth -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.10"
+        android:pathData="M86,54 A32,32 0 1 1 85.999,54 Z"/>
 
     <!-- Roundel ring — bold white donut -->
     <path
         android:fillColor="#FFFFFF"
         android:fillType="evenOdd"
         android:pathData="
-            M84,54 A30,30 0 1 1 83.999,54 Z
-            M74,54 A20,20 0 1 1 73.999,54 Z"/>
+            M82,54 A28,28 0 1 1 81.999,54 Z
+            M72,54 A18,18 0 1 1 71.999,54 Z"/>
 
-    <!-- Stadium bar with AI cutout via evenOdd -->
+    <!--
+        Stadium bar with AI letter cutouts (evenOdd — the inner shapes punch
+        the background gradient through, so AI reads in the brand colour).
+        Bar geometry:  x 19..89, y 47..61 (height 14), end radius = 7.
+        Letters sit between x≈40 and x≈68, y 48..60 (12 tall, ~14 wide each).
+    -->
     <path
-        android:fillColor="#FFFFFF"
         android:fillType="evenOdd"
         android:pathData="
-            M17,47 L91,47 Q97,47 97,54 Q97,61 91,61 L17,61 Q11,61 11,54 Q11,47 17,47 Z
-            M43,61 L48,48 L53,61 Z
-            M45.5,54 L50.5,54 L50.5,56.5 L45.5,56.5 Z
-            M57,48 L64,48 L64,60 L57,60 Z"/>
+            M26,47 L82,47 Q89,47 89,54 Q89,61 82,61 L26,61 Q19,61 19,54 Q19,47 26,47 Z
+            M40,60 L46,48 L52,60 L49,60 L48,57.5 L44,57.5 L43,60 Z
+            M44.8,55.3 L47.2,55.3 L46,52.6 Z
+            M58,48 L66,48 L66,50 L63.5,50 L63.5,58 L66,58 L66,60 L58,60 L58,58 L60.5,58 L60.5,50 L58,50 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="19"
+                android:startY="47"
+                android:endX="89"
+                android:endY="61"
+                android:type="linear">
+                <item android:offset="0.00" android:color="#FFFFFFFF" />
+                <item android:offset="0.55" android:color="#FFFFFFFF" />
+                <item android:offset="1.00" android:color="#FFE6F0FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- AI sparkle accent — 4-point star, the brand differentiator -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="
+            M78,18 L80.2,24.2 L86.4,26 L80.2,27.8 L78,34 L75.8,27.8 L69.6,26 L75.8,24.2 Z"/>
+
+    <!-- Tiny secondary sparkle for that 'AI shimmer' feel -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.85"
+        android:pathData="
+            M88,36 L88.9,38.1 L91,39 L88.9,39.9 L88,42 L87.1,39.9 L85,39 L87.1,38.1 Z"/>
 
 </vector>

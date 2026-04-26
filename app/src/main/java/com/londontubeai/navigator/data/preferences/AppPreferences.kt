@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -51,6 +52,10 @@ class AppPreferences @Inject constructor(
         private val KEY_ANALYTICS_ENABLED = booleanPreferencesKey("privacy_analytics_enabled")
         private val KEY_CRASH_REPORTS_ENABLED = booleanPreferencesKey("privacy_crash_reports_enabled")
         private val KEY_PERSONALISATION_ENABLED = booleanPreferencesKey("privacy_personalisation_enabled")
+        // UK GDPR consent — set to true once the user has explicitly seen and
+        // dismissed the consent screen. Until then, analytics/crash collection
+        // remain off (defaults above) per UK GDPR / PECR opt-in requirements.
+        private val KEY_CONSENT_DECISION_MADE = booleanPreferencesKey("privacy_consent_decision_made")
     }
 
     val onboardingComplete: Flow<Boolean> = context.dataStore.data.map { it[KEY_ONBOARDING_COMPLETE] ?: false }
@@ -64,7 +69,7 @@ class AppPreferences @Inject constructor(
     val homeStationId: Flow<String?> = context.dataStore.data.map { it[KEY_HOME_STATION_ID] }
     val workStationId: Flow<String?> = context.dataStore.data.map { it[KEY_WORK_STATION_ID] }
     val darkMode: Flow<String> = context.dataStore.data.map { it[KEY_DARK_MODE] ?: "system" }
-    val highContrast: Flow<Boolean> = context.dataStore.data.map { it[KEY_HIGH_CONTRAST] ?: false }
+    val highContrast: Flow<Boolean> = context.dataStore.data.map { it[KEY_HIGH_CONTRAST] ?: true }
     val largeText: Flow<Boolean> = context.dataStore.data.map { it[KEY_LARGE_TEXT] ?: false }
     val liveLocation: Flow<Boolean> = context.dataStore.data.map { it[KEY_LIVE_LOCATION] ?: false }
     val quietHours: Flow<Boolean> = context.dataStore.data.map { it[KEY_QUIET_HOURS] ?: false }
@@ -80,6 +85,11 @@ class AppPreferences @Inject constructor(
     val analyticsEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_ANALYTICS_ENABLED] ?: false }
     val crashReportsEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_CRASH_REPORTS_ENABLED] ?: false }
     val personalisationEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_PERSONALISATION_ENABLED] ?: true }
+    val consentDecisionMade: Flow<Boolean> = context.dataStore.data.map { it[KEY_CONSENT_DECISION_MADE] ?: false }
+
+    suspend fun setConsentDecisionMade(value: Boolean) {
+        context.dataStore.edit { it[KEY_CONSENT_DECISION_MADE] = value }
+    }
 
     suspend fun setAnalyticsEnabled(value: Boolean) {
         context.dataStore.edit { it[KEY_ANALYTICS_ENABLED] = value }
@@ -198,5 +208,32 @@ class AppPreferences @Inject constructor(
 
     suspend fun clearAll() {
         context.dataStore.edit { it.clear() }
+    }
+
+    suspend fun getAllPrefsMap(): Map<String, Any?> {
+        val data = context.dataStore.data.first()
+        return buildMap {
+            put("prefer_fastest", data[KEY_PREFER_FASTEST] ?: true)
+            put("prefer_less_crowds", data[KEY_PREFER_LESS_CROWDS] ?: true)
+            put("prefer_less_walking", data[KEY_PREFER_LESS_WALKING] ?: false)
+            put("prefer_step_free", data[KEY_PREFER_STEP_FREE] ?: false)
+            put("push_disruptions", data[KEY_PUSH_DISRUPTIONS] ?: true)
+            put("push_commute", data[KEY_PUSH_COMMUTE] ?: true)
+            put("push_ai_tips", data[KEY_PUSH_AI_TIPS] ?: false)
+            put("home_station_id", data[KEY_HOME_STATION_ID])
+            put("work_station_id", data[KEY_WORK_STATION_ID])
+            put("dark_mode", data[KEY_DARK_MODE] ?: "system")
+            put("high_contrast", data[KEY_HIGH_CONTRAST] ?: false)
+            put("large_text", data[KEY_LARGE_TEXT] ?: false)
+            put("live_location", data[KEY_LIVE_LOCATION] ?: false)
+            put("quiet_hours", data[KEY_QUIET_HOURS] ?: false)
+            put("severe_disruptions_only", data[KEY_SEVERE_ONLY] ?: false)
+            put("favourite_stations", data[KEY_FAVOURITE_STATIONS] ?: "")
+            put("max_walking_metres", data[KEY_MAX_WALKING_METRES] ?: 500)
+            put("max_interchanges", data[KEY_MAX_INTERCHANGES] ?: 3)
+            put("analytics_enabled", data[KEY_ANALYTICS_ENABLED] ?: false)
+            put("crash_reports_enabled", data[KEY_CRASH_REPORTS_ENABLED] ?: false)
+            put("personalisation_enabled", data[KEY_PERSONALISATION_ENABLED] ?: true)
+        }
     }
 }

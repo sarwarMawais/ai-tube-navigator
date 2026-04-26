@@ -29,6 +29,7 @@ import com.londontubeai.navigator.data.preferences.AppPreferences
 import com.londontubeai.navigator.ui.components.BottomNavBar
 import com.londontubeai.navigator.ui.components.OfflineBanner
 import com.londontubeai.navigator.ui.components.OnlineRestoredBanner
+import com.londontubeai.navigator.ui.screens.consent.ConsentScreen
 import com.londontubeai.navigator.ui.screens.home.HomeScreen
 import com.londontubeai.navigator.ui.screens.map.MapScreen
 import com.londontubeai.navigator.ui.screens.nearby.NearbyDetailScreen
@@ -50,6 +51,7 @@ import kotlinx.coroutines.launch
 fun AppNavigation(
     networkMonitor: NetworkMonitor? = null,
     startOnboarding: Boolean = false,
+    startConsent: Boolean = false,
     appPreferences: AppPreferences? = null,
     iconGradientStart: Color = Color(0xFF0A1628),
     iconGradientEnd: Color = Color(0xFF003688),
@@ -95,7 +97,15 @@ fun AppNavigation(
     }
 
     val startDest = Screen.Splash.route
-    val afterSplashDest = if (startOnboarding) Screen.Onboarding.route else Screen.Home.route
+    // Splash → Consent (if first launch) → Onboarding (if not done) → Home.
+    // GDPR / PECR requires consent to be captured before any tracking begins,
+    // so the consent gate must precede onboarding.
+    val afterSplashDest = when {
+        startConsent -> Screen.Consent.route
+        startOnboarding -> Screen.Onboarding.route
+        else -> Screen.Home.route
+    }
+    val afterConsentDest = if (startOnboarding) Screen.Onboarding.route else Screen.Home.route
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -122,6 +132,16 @@ fun AppNavigation(
                         },
                         iconGradientStart = iconGradientStart,
                         iconGradientEnd = iconGradientEnd,
+                    )
+                }
+
+                composable(Screen.Consent.route) {
+                    ConsentScreen(
+                        onDecisionMade = {
+                            navController.navigate(afterConsentDest) {
+                                popUpTo(Screen.Consent.route) { inclusive = true }
+                            }
+                        },
                     )
                 }
 

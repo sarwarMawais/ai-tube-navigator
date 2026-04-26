@@ -5,20 +5,34 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Monochrome version for themed icons (Android 13+) - simple roundel without AI cutout -->
-    
+    <!--
+        Monochrome layer for Android 13+ themed icons. Geometry matches
+        ic_launcher_foreground_premium so the brand stays consistent under
+        any system tint. Single colour required by the themed-icon spec.
+    -->
+
     <!-- Roundel ring -->
     <path
         android:fillColor="#FFFFFF"
         android:fillType="evenOdd"
         android:pathData="
-            M84,54 A30,30 0 1 1 83.999,54 Z
-            M74,54 A20,20 0 1 1 73.999,54 Z"/>
+            M82,54 A28,28 0 1 1 81.999,54 Z
+            M72,54 A18,18 0 1 1 71.999,54 Z"/>
 
-    <!-- Stadium bar -->
+    <!-- Stadium bar with AI cutout (evenOdd punch) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="
+            M26,47 L82,47 Q89,47 89,54 Q89,61 82,61 L26,61 Q19,61 19,54 Q19,47 26,47 Z
+            M40,60 L46,48 L52,60 L49,60 L48,57.5 L44,57.5 L43,60 Z
+            M44.8,55.3 L47.2,55.3 L46,52.6 Z
+            M58,48 L66,48 L66,50 L63.5,50 L63.5,58 L66,58 L66,60 L58,60 L58,58 L60.5,58 L60.5,50 L58,50 Z"/>
+
+    <!-- AI sparkle accent -->
     <path
         android:fillColor="#FFFFFF"
         android:pathData="
-            M17,47 L91,47 Q97,47 97,54 Q97,61 91,61 L17,61 Q11,61 11,54 Q11,47 17,47 Z"/>
+            M78,18 L80.2,24.2 L86.4,26 L80.2,27.8 L78,34 L75.8,27.8 L69.6,26 L75.8,24.2 Z"/>
 
 </vector>

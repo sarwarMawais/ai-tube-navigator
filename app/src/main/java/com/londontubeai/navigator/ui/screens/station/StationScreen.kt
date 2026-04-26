@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -116,6 +117,7 @@ import com.londontubeai.navigator.data.model.StationExit
 import com.londontubeai.navigator.data.model.TubeData
 import com.londontubeai.navigator.ui.components.CarriageVisualizer
 import com.londontubeai.navigator.ui.components.StationArrivalsCard
+import com.londontubeai.navigator.ui.components.SystemBarsEffect
 import com.londontubeai.navigator.ui.components.TubeLineChip
 import com.londontubeai.navigator.ui.theme.Spacing
 import com.londontubeai.navigator.ui.theme.StatusGood
@@ -821,7 +823,14 @@ fun StationDetailScreen(
     val isHome = station?.id != null && station.id == listState.homeStationId
     val isWork = station?.id != null && station.id == listState.workStationId
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    // TopAppBar uses the surface (light) colour → keep status bar icons dark.
+    SystemBarsEffect(lightBackground = true)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+    ) {
         // ── Top bar with Share / Open-in-Maps / Home-Work / Favourite ──
         TopAppBar(
             title = { Text(station?.name ?: "Station", fontWeight = FontWeight.Bold) },

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -71,6 +72,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.londontubeai.navigator.ui.components.SystemBarsEffect
 import com.londontubeai.navigator.ui.theme.Spacing
 import com.londontubeai.navigator.ui.theme.StatusGood
 import com.londontubeai.navigator.ui.theme.TubeAccent
@@ -99,6 +101,10 @@ fun PremiumScreen(
 
     // Default to Annual — the value tier we want most users on.
     var selectedPeriod by remember { mutableStateOf(BillingPeriod.ANNUAL) }
+
+    // Hero is a dark navy gradient → keep status bar icons light so the
+    // system clock / battery / signal stay readable when scrolled to top.
+    SystemBarsEffect(lightBackground = false)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -238,7 +244,11 @@ private fun PremiumHero(onBack: () -> Unit, isAlreadyPremium: Boolean) {
             drawCircle(Color.White.copy(alpha = 0.03f), 160.dp.toPx(), Offset(size.width * 0.85f, size.height * 0.3f))
             drawCircle(PremiumGold.copy(alpha = 0.04f), 100.dp.toPx(), Offset(size.width * 0.1f, size.height * 0.7f))
         }
-        Column(modifier = Modifier.padding(top = 48.dp, bottom = 32.dp, start = 24.dp, end = 24.dp)) {
+        Column(
+            modifier = Modifier
+                .statusBarsPadding()
+                .padding(top = 12.dp, bottom = 32.dp, start = 24.dp, end = 24.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White.copy(alpha = 0.7f))

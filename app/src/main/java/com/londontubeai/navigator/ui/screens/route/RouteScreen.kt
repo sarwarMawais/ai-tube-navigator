@@ -111,6 +111,16 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.SoftwareKeyboardController
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.LocalTaxi
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.PushPin
+import android.speech.RecognizerIntent
+import android.net.Uri
 import android.content.Intent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -171,11 +181,39 @@ fun RouteScreen(
     val isPremium by viewModel.isPremium.collectAsStateWithLifecycle()
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val haptic = LocalHapticFeedback.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var showTimePicker by remember { mutableStateOf(false) }
     var pendingDepartureOption by remember { mutableStateOf<DepartureOption?>(null) }
+
+    // Voice input launcher — captures speech and routes text to whichever
+    // field was requested. Target is set by the field's mic button.
+    var voiceTarget by remember { mutableStateOf<VoiceField?>(null) }
+    val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val text = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (!text.isNullOrBlank()) {
+            when (voiceTarget) {
+                VoiceField.FROM -> viewModel.updateFromQuery(text)
+                VoiceField.TO -> viewModel.updateToQuery(text)
+                null -> {}
+            }
+        }
+        voiceTarget = null
+    }
+    val launchVoice: (VoiceField) -> Unit = { target ->
+        voiceTarget = target
+        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.UK.toString())
+            putExtra(RecognizerIntent.EXTRA_PROMPT, if (target == VoiceField.FROM) "Say a starting station" else "Say a destination")
+        }
+        runCatching { voiceLauncher.launch(i) }.onFailure {
+            scope.launch { snackbarHostState.showSnackbar("Voice input not available on this device") }
+            voiceTarget = null
+        }
+    }
 
     LaunchedEffect(initialToStationId, initialToPlaceName, initialToPlaceLat, initialToPlaceLng) {
         if (!initialToStationId.isNullOrBlank()) {
@@ -215,10 +253,15 @@ fun RouteScreen(
             onToFocus = { viewModel.setToFieldFocused(it) },
             onFromSelect = { s -> viewModel.selectFromStation(s); keyboardController?.hide(); focusManager.clearFocus() },
             onToSelect = { s -> viewModel.selectToStation(s); keyboardController?.hide(); focusManager.clearFocus() },
-            onSwap = { viewModel.swapStations() },
+            onSwap = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                viewModel.swapStations()
+            },
             onUseLocation = { viewModel.useMyLocation() },
             onClearFrom = { viewModel.updateFromQuery("") },
             onClearTo = { viewModel.updateToQuery("") },
+            onVoiceFrom = { launchVoice(VoiceField.FROM) },
+            onVoiceTo = { launchVoice(VoiceField.TO) },
             onSelectPreference = { viewModel.selectPreference(it) },
             onSelectDeparture = { opt ->
                 if (opt == DepartureOption.LEAVE_NOW) {
@@ -235,24 +278,14 @@ fun RouteScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
         ) {
-            // ── Calculating ──────────────────────────────────────
+            // ── Calculating ── skeleton loading cards give a sense of progress ────────────────────
             if (uiState.isCalculating) {
                 item {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text("Finding the best route...", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
-                        }
-                    }
+                    RouteCalculatingSkeleton()
                 }
             }
 
-            // ── Route Error ──────────────────────────────────────
+            // ── Route Error ───────────────────────────────
             if (uiState.routeError != null) {
                 item {
                     Surface(
@@ -266,8 +299,49 @@ fun RouteScreen(
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(uiState.routeError ?: "", style = MaterialTheme.typography.bodySmall, color = StatusSevere, modifier = Modifier.weight(1f))
                             }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            // Quick-action row — Try again + Uber fallback.
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                // Taxi / Uber deep link — launches Uber app or opens Play Store fallback.
+                                val destLat = uiState.toStation?.latitude ?: 0.0
+                                val destLng = uiState.toStation?.longitude ?: 0.0
+                                if (destLat != 0.0 && destLng != 0.0) {
+                                    Surface(
+                                        onClick = {
+                                            val origLat = uiState.userLat ?: uiState.fromStation?.latitude
+                                            val origLng = uiState.userLng ?: uiState.fromStation?.longitude
+                                            val uberUri = buildString {
+                                                append("uber://?action=setPickup")
+                                                if (origLat != null && origLng != null) {
+                                                    append("&pickup[latitude]=$origLat&pickup[longitude]=$origLng")
+                                                } else append("&pickup=my_location")
+                                                append("&dropoff[latitude]=$destLat&dropoff[longitude]=$destLng")
+                                                uiState.toStation?.name?.let { append("&dropoff[nickname]=${Uri.encode(it)}") }
+                                            }
+                                            val webUri = "https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[latitude]=$destLat&dropoff[longitude]=$destLng"
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uberUri))
+                                            runCatching { context.startActivity(intent) }.onFailure {
+                                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(webUri))) }
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = Color.Black,
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Icon(Icons.Filled.LocalTaxi, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Get a taxi", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color.White)
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.weight(1f))
                                 TextButton(onClick = { viewModel.recalculate() }) {
                                     Icon(Icons.Filled.SyncAlt, null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
@@ -355,16 +429,31 @@ fun RouteScreen(
                 }
             }
 
-            // ── Route Result ─────────────────────────────────────
+            // ── Route Result ───────────────────────────────
             if (uiState.routeCalculated) {
                 val route = uiState.journeyRoute
+
+                // Smart Hero — "Should I leave now?" single-glance summary
+                // synthesising disruption, reliability and crowd signals.
+                item {
+                    SmartHeroInsightCard(
+                        route = route,
+                        lineStatuses = uiState.lineStatuses,
+                        delayPredictions = uiState.delayPredictions,
+                        crowdPrediction = uiState.crowdPrediction,
+                        departureOption = uiState.departureOption,
+                    )
+                }
 
                 // Google Maps-style multi-option cards
                 item {
                     RouteOptionsSection(
                         options = uiState.routeOptions,
                         selectedIndex = uiState.selectedRouteIndex,
-                        onSelectOption = { viewModel.selectRouteOption(it) },
+                        onSelectOption = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            viewModel.selectRouteOption(it)
+                        },
                         onNavigateToMap = onNavigateToMap,
                         route = route,
                         departureOption = uiState.departureOption,
@@ -375,6 +464,8 @@ fun RouteScreen(
                         onRefresh = { viewModel.refresh() },
                         onShiftEarlier = { viewModel.shiftDepartureTime(-15) },
                         onShiftLater = { viewModel.shiftDepartureTime(15) },
+                        lineStatuses = uiState.lineStatuses,
+                        delayPredictions = uiState.delayPredictions,
                     )
                 }
 
@@ -518,7 +609,10 @@ fun RouteScreen(
                             icon = if (uiState.isFavorite) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
                             label = if (uiState.isFavorite) "Saved" else "Save",
                             active = uiState.isFavorite,
-                            onClick = { viewModel.toggleFavorite() },
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.toggleFavorite()
+                            },
                         )
                         ActionButton(
                             modifier = Modifier.weight(1f),
@@ -535,6 +629,7 @@ fun RouteScreen(
                             label = if (uiState.reminderSet) "Set" else "Remind",
                             active = uiState.reminderSet,
                             onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 val message = viewModel.setReminder()
                                 scope.launch { snackbarHostState.showSnackbar(message) }
                             },
@@ -562,7 +657,7 @@ fun RouteScreen(
                         Text("Recent Journeys", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     }
                 }
-                items(recentJourneys) { journey ->
+                items(recentJourneys.sortedByDescending { it.isFavourite }) { journey ->
                     Surface(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp).clickable { viewModel.selectRecentJourney(journey) },
                         shape = RoundedCornerShape(14.dp),
@@ -578,9 +673,20 @@ fun RouteScreen(
                                 Text("${journey.fromStationName} → ${journey.toStationName}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text("Tap to plan again", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            if (journey.isFavourite) {
-                                Icon(Icons.Filled.Star, null, tint = Color(0xFFFFD700), modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
+                            // Pin / unpin toggle — pinned journeys sort to the top of recents.
+                            IconButton(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.togglePinJourney(journey)
+                                },
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    if (journey.isFavourite) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                                    if (journey.isFavourite) "Unpin" else "Pin",
+                                    tint = if (journey.isFavourite) Color(0xFFFFB300) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(16.dp),
+                                )
                             }
                             Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), modifier = Modifier.size(16.dp))
                         }
@@ -698,6 +804,8 @@ private fun GMapsSearchHeader(
     onUseLocation: () -> Unit,
     onClearFrom: () -> Unit,
     onClearTo: () -> Unit,
+    onVoiceFrom: () -> Unit = {},
+    onVoiceTo: () -> Unit = {},
     onSelectPreference: (RoutePreference) -> Unit,
     onSelectDeparture: (DepartureOption) -> Unit,
 ) {
@@ -792,6 +900,10 @@ private fun GMapsSearchHeader(
                                 IconButton(onClick = onClearFrom, modifier = Modifier.size(28.dp)) {
                                     Icon(Icons.Filled.Close, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
+                            } else {
+                                IconButton(onClick = onVoiceFrom, modifier = Modifier.size(28.dp)) {
+                                    Icon(Icons.Filled.Mic, "Voice input", modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
+                                }
                             }
                         }
                         // Thin divider
@@ -827,6 +939,10 @@ private fun GMapsSearchHeader(
                             if (uiState.toQuery.isNotEmpty()) {
                                 IconButton(onClick = onClearTo, modifier = Modifier.size(28.dp)) {
                                     Icon(Icons.Filled.Close, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            } else {
+                                IconButton(onClick = onVoiceTo, modifier = Modifier.size(28.dp)) {
+                                    Icon(Icons.Filled.Mic, "Voice input", modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
                                 }
                             }
                         }
@@ -949,6 +1065,8 @@ private fun RouteOptionsSection(
     onRefresh: () -> Unit = {},
     onShiftEarlier: () -> Unit = {},
     onShiftLater: () -> Unit = {},
+    lineStatuses: List<com.londontubeai.navigator.data.model.LineStatus> = emptyList(),
+    delayPredictions: Map<String, Int> = emptyMap(),
 ) {
     val fastestDuration = options.firstOrNull()?.route?.totalDurationMinutes ?: 0
 
@@ -1058,6 +1176,8 @@ private fun RouteOptionsSection(
                     isSelected = true,
                     extraMins = 0,
                     onSelect = {},
+                    lineStatuses = lineStatuses,
+                    delayPredictions = delayPredictions,
                 )
             } else {
                 options.forEachIndexed { index, option ->
@@ -1069,6 +1189,8 @@ private fun RouteOptionsSection(
                         departureOption = departureOption,
                         currentHour = currentHour,
                         currentMinute = currentMinute,
+                        lineStatuses = lineStatuses,
+                        delayPredictions = delayPredictions,
                     )
                     if (index < options.size - 1) {
                         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)))
@@ -1181,6 +1303,8 @@ private fun RouteOptionCard(
     departureOption: DepartureOption = DepartureOption.LEAVE_NOW,
     currentHour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY),
     currentMinute: Int = Calendar.getInstance().get(Calendar.MINUTE),
+    lineStatuses: List<com.londontubeai.navigator.data.model.LineStatus> = emptyList(),
+    delayPredictions: Map<String, Int> = emptyMap(),
 ) {
     val route = option.route
     // Live-tick every 30s so times and "Leave in Xm" stay fresh as the clock advances.
@@ -1235,10 +1359,35 @@ private fun RouteOptionCard(
         }
     }
 
+    // Derive dominant line colour for selected ring / highlight.
+    val dominantLineColor = route.legs.firstOrNull { it.mode == TransportMode.TUBE }?.line?.color
+        ?: MaterialTheme.colorScheme.primary
+    // Disruption + reliability — derived from live TfL statuses and ML delay predictions.
+    val routeDisruption = remember(route.legs, lineStatuses) {
+        route.legs.asSequence()
+            .filter { it.mode == TransportMode.TUBE }
+            .mapNotNull { leg -> lineStatuses.firstOrNull { it.lineId.equals(leg.line.id, ignoreCase = true) && !it.isGoodService } }
+            .firstOrNull()
+    }
+    val reliabilityScore = remember(route.legs, lineStatuses, delayPredictions) {
+        computeReliabilityScore(route.legs, lineStatuses, delayPredictions)
+    }
+    val viaSummary = remember(route.legs) { buildViaSummary(route.legs) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.04f) else Color.Transparent)
+            .then(
+                if (isSelected) Modifier.border(
+                    width = 2.dp,
+                    color = dominantLineColor,
+                    shape = RoundedCornerShape(12.dp),
+                ) else Modifier
+            )
+            .background(
+                color = if (isSelected) dominantLineColor.copy(alpha = 0.06f) else Color.Transparent,
+                shape = RoundedCornerShape(12.dp),
+            )
             .clickable { onSelect() }
             .padding(horizontal = 20.dp, vertical = 14.dp),
     ) {
@@ -1321,6 +1470,67 @@ private fun RouteOptionCard(
                 color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
             ) {
                 Text(durationLabel, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        // ── Via summary (e.g. "via Central → Jubilee") ───────
+        if (viaSummary.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                viaSummary,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        // ── Disruption + reliability badges ──────────────────
+        if (routeDisruption != null || reliabilityScore < 90) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (routeDisruption != null) {
+                    val sev = routeDisruption.statusSeverity
+                    val sevColor = when {
+                        sev <= 6 -> StatusSevere
+                        else -> StatusMinor
+                    }
+                    Surface(shape = RoundedCornerShape(6.dp), color = sevColor.copy(alpha = 0.14f)) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Info, null, tint = sevColor, modifier = Modifier.size(11.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                "${routeDisruption.statusDescription} on ${routeDisruption.lineName}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = sevColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                val reliabilityColor = when {
+                    reliabilityScore >= 90 -> StatusGood
+                    reliabilityScore >= 75 -> StatusMinor
+                    else -> StatusSevere
+                }
+                Surface(shape = RoundedCornerShape(6.dp), color = reliabilityColor.copy(alpha = 0.14f)) {
+                    Text(
+                        "${reliabilityScore}% on time",
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = reliabilityColor,
+                    )
+                }
             }
         }
 
@@ -2527,3 +2737,213 @@ private fun crowdColor(level: CrowdLevel): Color = when (level) {
     CrowdLevel.VERY_HIGH -> StatusSevere
     CrowdLevel.EXTREME -> StatusSevere
 }
+
+/**
+ * Builds a short "via X → Y" summary from the tube/bus legs of a journey.
+ * Walking legs are skipped. Returns empty string when there's nothing meaningful.
+ */
+private fun buildViaSummary(legs: List<JourneyLeg>): String {
+    val transitLegs = legs.filter { it.mode != TransportMode.WALKING }
+    if (transitLegs.isEmpty()) return ""
+    val names = transitLegs.map { leg ->
+        when (leg.mode) {
+            TransportMode.BUS -> "Bus ${leg.busRouteNumber.ifBlank { leg.line.name }}"
+            else -> leg.line.name.substringBefore(" ")
+        }
+    }.distinct()
+    return when (names.size) {
+        0 -> ""
+        1 -> "via ${names.first()}${if (transitLegs.first().mode == TransportMode.TUBE && transitLegs.size == 1) " · no changes" else ""}"
+        else -> "via " + names.joinToString(" → ")
+    }
+}
+
+/**
+ * Computes a 0–100 reliability score for a route using live TfL line statuses
+ * and ML-predicted delay minutes. Good service baseline is 95; disruptions and
+ * predicted delays subtract points. Non-tube legs are ignored.
+ */
+private fun computeReliabilityScore(
+    legs: List<JourneyLeg>,
+    lineStatuses: List<com.londontubeai.navigator.data.model.LineStatus>,
+    delayPredictions: Map<String, Int>,
+): Int {
+    val tubeLegs = legs.filter { it.mode == TransportMode.TUBE }
+    if (tubeLegs.isEmpty()) return 95
+    var score = 95
+    tubeLegs.forEach { leg ->
+        val status = lineStatuses.firstOrNull { it.lineId.equals(leg.line.id, ignoreCase = true) }
+        if (status != null && !status.isGoodService) {
+            // Severity 1–6 = severe, 7–9 = minor
+            score -= if (status.statusSeverity <= 6) 25 else 12
+        }
+        val predicted = delayPredictions[leg.line.id] ?: 0
+        if (predicted >= 2) score -= (predicted * 2).coerceAtMost(15)
+    }
+    return score.coerceIn(30, 99)
+}
+
+/** Which search field voice input should populate. */
+private enum class VoiceField { FROM, TO }
+
+/**
+ * Shimmer-style skeleton cards shown while the route planner is running.
+ * Gives the user a sense of progress and layout preview.
+ */
+@Composable
+private fun RouteCalculatingSkeleton() {
+    // Lightweight shimmer driven by a coroutine loop — avoids needing
+    // extra infinite-transition APIs and compiles cleanly on any Compose version.
+    var pulse by remember { mutableStateOf(0.35f) }
+    LaunchedEffect(Unit) {
+        val frames = listOf(0.35f, 0.42f, 0.50f, 0.58f, 0.65f, 0.58f, 0.50f, 0.42f)
+        var i = 0
+        while (true) {
+            pulse = frames[i % frames.size]
+            i++
+            kotlinx.coroutines.delay(120L)
+        }
+    }
+    val shimmer by animateFloatAsState(pulse, animationSpec = tween(120), label = "shimmer")
+    val base = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f * shimmer)
+    val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f * shimmer)
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 4.dp,
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Finding the best routes…", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            repeat(3) { idx ->
+                // Fake option card
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.height(14.dp).width(80.dp).clip(RoundedCornerShape(4.dp)).background(strong))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Box(modifier = Modifier.height(14.dp).width(50.dp).clip(RoundedCornerShape(4.dp)).background(base))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(modifier = Modifier.height(20.dp).fillMaxWidth(0.7f).clip(RoundedCornerShape(4.dp)).background(strong))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        repeat(3) {
+                            Box(modifier = Modifier.height(14.dp).width(48.dp).clip(RoundedCornerShape(4.dp)).background(base))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(modifier = Modifier.height(12.dp).fillMaxWidth(0.9f).clip(RoundedCornerShape(4.dp)).background(base))
+                }
+                if (idx < 2) {
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Single-glance "Should I leave now?" insight synthesising reliability,
+ * disruption and crowd signals into a green / amber / red verdict.
+ */
+@Composable
+private fun SmartHeroInsightCard(
+    route: JourneyRoute?,
+    lineStatuses: List<com.londontubeai.navigator.data.model.LineStatus>,
+    delayPredictions: Map<String, Int>,
+    crowdPrediction: com.londontubeai.navigator.data.model.CrowdPrediction?,
+    departureOption: DepartureOption,
+) {
+    if (route == null) return
+    val reliability = computeReliabilityScore(route.legs, lineStatuses, delayPredictions)
+    val disruption = route.legs.asSequence()
+        .filter { it.mode == TransportMode.TUBE }
+        .mapNotNull { leg -> lineStatuses.firstOrNull { it.lineId.equals(leg.line.id, ignoreCase = true) && !it.isGoodService } }
+        .firstOrNull()
+    val crowdLevel = crowdPrediction?.crowdLevel
+    val verdictColor: Color
+    val verdictLabel: String
+    val verdictDetail: String
+    val verdictIcon: ImageVector
+    when {
+        disruption != null && disruption.statusSeverity <= 6 -> {
+            verdictColor = StatusSevere
+            verdictLabel = "Consider alternatives"
+            verdictDetail = "${disruption.statusDescription} on ${disruption.lineName}"
+            verdictIcon = Icons.Filled.Info
+        }
+        reliability < 75 || (crowdLevel != null && (crowdLevel == CrowdLevel.VERY_HIGH || crowdLevel == CrowdLevel.EXTREME)) -> {
+            verdictColor = StatusMinor
+            verdictLabel = if (departureOption == DepartureOption.LEAVE_NOW) "Leave soon — expect delays" else "Expect delays"
+            verdictDetail = when {
+                disruption != null -> "${disruption.statusDescription} on ${disruption.lineName} · ${reliability}% on time"
+                crowdLevel != null -> "${crowdLevel.label} at boarding · ${reliability}% on time"
+                else -> "${reliability}% on-time probability"
+            }
+            verdictIcon = Icons.Filled.Schedule
+        }
+        else -> {
+            verdictColor = StatusGood
+            verdictLabel = if (departureOption == DepartureOption.LEAVE_NOW) "Good time to leave" else "Journey looks clear"
+            verdictDetail = when {
+                crowdLevel != null -> "${crowdLevel.label} · ${reliability}% on time"
+                else -> "${reliability}% on-time probability · Good service"
+            }
+            verdictIcon = Icons.Filled.CheckCircle
+        }
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = verdictColor.copy(alpha = 0.08f),
+        border = BorderStroke(1.dp, verdictColor.copy(alpha = 0.28f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(verdictColor.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(verdictIcon, null, tint = verdictColor, modifier = Modifier.size(20.dp))
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(verdictLabel, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.ExtraBold, color = verdictColor)
+                Text(
+                    verdictDetail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = verdictColor,
+            ) {
+                Text(
+                    "${reliability}%",
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                )
+            }
+        }
+    }
+}
+

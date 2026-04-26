@@ -2,7 +2,12 @@ package com.londontubeai.navigator.ui.screens.nearby
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
@@ -90,6 +95,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import com.londontubeai.navigator.data.model.CrowdLevel
 
 private val BusRed = Color(0xFFE32017)
@@ -697,6 +703,36 @@ private fun NearbyStationCard(
                     }
                 }
 
+                // ── Best next move chip ───────────────────────────
+                val bestMove = remember(nearbyStation.arrivals, nearbyStation.busRoutes) {
+                    computeBestNextMove(nearbyStation.arrivals, nearbyStation.busRoutes)
+                }
+                if (bestMove != null) {
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = bestMove.accentColor.copy(alpha = 0.08f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = Spacing.md, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Schedule, null, tint = bestMove.accentColor, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "Best now · ${bestMove.text}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = bestMove.accentColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+
                 // Crowd prediction chip
                 nearbyStation.crowdPrediction?.let { crowd ->
                     val crowdColor = when (crowd.crowdLevel) {
@@ -1076,6 +1112,40 @@ private fun sourceLabel(source: NearbyDataSource): String {
     }
 }
 
+private data class BestNextMoveData(val text: String, val accentColor: Color)
+
+private fun computeBestNextMove(
+    arrivals: List<StationArrivalInfo>,
+    busRoutes: List<BusRoute>,
+): BestNextMoveData? {
+    val bestTube = arrivals.minByOrNull { it.minutesUntil }
+    val bestBus = busRoutes.minByOrNull { it.estimatedMinutes }
+    return when {
+        bestTube != null && bestBus != null -> {
+            if (bestTube.minutesUntil <= bestBus.estimatedMinutes) {
+                BestNextMoveData(
+                    "${bestTube.lineName} → ${bestTube.destination} · ${if (bestTube.minutesUntil == 0) "Due" else "${bestTube.minutesUntil}m"}",
+                    bestTube.lineColor ?: TubeBlue,
+                )
+            } else {
+                BestNextMoveData(
+                    "Bus ${bestBus.busNumber} → ${bestBus.direction} · ${if (bestBus.estimatedMinutes == 0) "Due" else "${bestBus.estimatedMinutes}m"}",
+                    BusRed,
+                )
+            }
+        }
+        bestTube != null -> BestNextMoveData(
+            "${bestTube.lineName} → ${bestTube.destination} · ${if (bestTube.minutesUntil == 0) "Due" else "${bestTube.minutesUntil}m"}",
+            bestTube.lineColor ?: TubeBlue,
+        )
+        bestBus != null -> BestNextMoveData(
+            "Bus ${bestBus.busNumber} → ${bestBus.direction} · ${if (bestBus.estimatedMinutes == 0) "Due" else "${bestBus.estimatedMinutes}m"}",
+            BusRed,
+        )
+        else -> null
+    }
+}
+
 private fun formatFreshness(updatedAt: Long): String {
     val ageMinutes = ((System.currentTimeMillis() - updatedAt) / 60_000L).coerceAtLeast(0L)
     return when {
@@ -1087,23 +1157,93 @@ private fun formatFreshness(updatedAt: Long): String {
 
 @Composable
 private fun LoadingState() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val shimmerAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.75f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "shimmer_alpha",
+    )
+    val shimmer = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = shimmerAlpha)
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars),
+        contentPadding = PaddingValues(
+            start = Spacing.screenHorizontal,
+            end = Spacing.screenHorizontal,
+            top = Spacing.md,
+            bottom = 100.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md),
+    ) {
+        item {
             Box(
-                modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp))
-                    .background(brandGradient().linear()),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp), strokeWidth = 3.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(shimmer),
+            )
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                repeat(4) {
+                    Box(
+                        modifier = Modifier
+                            .height(34.dp)
+                            .width(82.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(shimmer),
+                    )
+                }
             }
-            Text("Finding nearby transport...", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Text("Getting your location and live data", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        items(3) {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(0.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column {
+                    Box(Modifier.fillMaxWidth().height(4.dp).background(shimmer))
+                    Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)).background(shimmer))
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Box(Modifier.fillMaxWidth(0.6f).height(16.dp).clip(RoundedCornerShape(8.dp)).background(shimmer))
+                                Box(Modifier.fillMaxWidth(0.4f).height(12.dp).clip(RoundedCornerShape(6.dp)).background(shimmer))
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    repeat(3) { Box(Modifier.size(8.dp).clip(CircleShape).background(shimmer)) }
+                                }
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.End) {
+                                Box(Modifier.width(50.dp).height(18.dp).clip(RoundedCornerShape(8.dp)).background(shimmer))
+                                Box(Modifier.width(40.dp).height(18.dp).clip(RoundedCornerShape(8.dp)).background(shimmer))
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                            Box(Modifier.weight(1f).height(32.dp).clip(RoundedCornerShape(12.dp)).background(shimmer))
+                            Box(Modifier.weight(1f).height(32.dp).clip(RoundedCornerShape(12.dp)).background(shimmer))
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Box(Modifier.width(48.dp).height(20.dp).clip(RoundedCornerShape(8.dp)).background(shimmer))
+                            Box(Modifier.width(60.dp).height(20.dp).clip(RoundedCornerShape(8.dp)).background(shimmer))
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun ErrorState(error: String, onRetry: () -> Unit) {
+    val context = LocalContext.current
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(horizontal = 40.dp)) {
             Surface(shape = RoundedCornerShape(20.dp), color = StatusSevere.copy(alpha = 0.1f)) {
@@ -1119,6 +1259,21 @@ private fun ErrorState(error: String, onRetry: () -> Unit) {
                     Icon(Icons.Filled.Refresh, null, tint = Color.White, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Try Again", color = Color.White, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                    }
+                },
+            ) {
+                Row(modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.LocationOn, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Open Location Settings", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
                 }
             }
         }

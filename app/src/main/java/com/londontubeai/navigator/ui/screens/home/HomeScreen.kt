@@ -116,6 +116,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.londontubeai.navigator.data.model.AiInsight
@@ -161,6 +163,7 @@ fun HomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val recentJourneys by viewModel.recentJourneys.collectAsStateWithLifecycle()
+    val haptic = LocalHapticFeedback.current
     // Gate the auto-refresh loop on this screen being attached.
     DisposableEffect(Unit) {
         viewModel.setScreenActive(true)
@@ -180,6 +183,11 @@ fun HomeScreen(
                 null,
             )
         }
+    }
+    // Wrap commute open with a haptic so taps feel reactive
+    val openCommuteRouteHaptic: () -> Unit = {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        openCommuteRoute()
     }
     val primaryAction = remember(
         uiState.severeDisruptionCount,
@@ -210,7 +218,14 @@ fun HomeScreen(
     LaunchedEffect(Unit) {
         val currentState = permissionsHandler.getPermissionsState()
         permissionsState = currentState
-        if (!currentState.locationPermissionGranted) {
+        // Only nudge the ViewModel when permission was *granted out-of-band*
+        // (e.g. via system Settings while the app was backgrounded). Never call
+        // it with `granted=false` on attach — that would wipe the in-flight
+        // nearby load that ViewModel.init already kicked off, which is the
+        // root cause of the regression "Nearby stations not loading on Home".
+        if (currentState.locationPermissionGranted) {
+            viewModel.onPermissionsChanged(currentState)
+        } else {
             delay(1000)
             showPermissionDialog = true
         }
@@ -226,6 +241,22 @@ fun HomeScreen(
         )
     }
 
+    // Compute contextual banner state OUTSIDE the LazyColumn so we only
+    // add an `item {}` when there is actually something to show — otherwise
+    // LazyColumn renders an empty slot that creates dead space above the hero.
+    val commuteLineIds = remember(uiState.homeStationId, uiState.workStationId) {
+        val ids = mutableSetOf<String>()
+        listOfNotNull(uiState.homeStationId, uiState.workStationId).forEach { stationId ->
+            TubeData.getStationById(stationId)?.lineIds?.let { ids.addAll(it) }
+        }
+        ids
+    }
+    val commuteDisruption = uiState.lineStatuses.firstOrNull {
+        !it.isGoodService && commuteLineIds.isNotEmpty() && it.lineId in commuteLineIds && it.statusSeverity <= 6
+    }
+    val weather = uiState.weatherInfo
+    val showWeatherHint = weather != null && (weather.impactLevel == ImpactLevel.HIGH || weather.impactLevel == ImpactLevel.EXTREME)
+
     PullToRefreshBox(
         isRefreshing = uiState.isLoadingStatus,
         onRefresh = { viewModel.refreshHomeData() },
@@ -234,7 +265,40 @@ fun HomeScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 16.dp),
         ) {
-            // ── Premium Hero Header ──────────────────────────────
+            // ── Top Contextual Banner ── surfaces commute disruption / weather
+            // warnings above the hero. Only added when there's something to show.
+            if (commuteDisruption != null) {
+                item {
+                    TopContextBanner(
+                        color = StatusSevere,
+                        icon = Icons.Filled.Warning,
+                        title = "Your commute is affected",
+                        detail = "${commuteDisruption.statusDescription} on ${commuteDisruption.lineName}",
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onNavigateToStatus()
+                        },
+                    )
+                }
+            } else if (showWeatherHint && weather != null) {
+                item {
+                    val (title, detail) = weatherHintText(weather)
+                    TopContextBanner(
+                        color = StatusMinor,
+                        icon = when (weather.icon) {
+                            "09d", "09n", "10d", "10n" -> Icons.Filled.Opacity
+                            "13d", "13n" -> Icons.Filled.AcUnit
+                            "11d", "11n" -> Icons.Filled.FlashOn
+                            else -> Icons.Filled.Cloud
+                        },
+                        title = title,
+                        detail = detail,
+                        onClick = null,
+                    )
+                }
+            }
+
+            // ── Premium Hero Header ────────────────────────────────
             item {
                 HeroHeader(
                     goodServiceCount = uiState.lineStatuses.count { it.isGoodService },
@@ -3998,4 +4062,81 @@ private fun StatusErrorCard(error: String, onRetry: (() -> Unit)? = null) {
             }
         }
     }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Top contextual banner — shown above the hero when the user's
+// commute is disrupted or weather impact is high. Tappable when
+// onClick is provided so users can drill into status detail.
+// ═══════════════════════════════════════════════════════════════
+
+@Composable
+private fun TopContextBanner(
+    color: Color,
+    icon: ImageVector,
+    title: String,
+    detail: String,
+    onClick: (() -> Unit)? = null,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+        shape = RoundedCornerShape(14.dp),
+        color = color.copy(alpha = 0.10f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.30f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(color.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = color,
+                )
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (onClick != null) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowForward,
+                    null,
+                    tint = color.copy(alpha = 0.6f),
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Generates a (title, detail) tuple for weather hints. We surface
+ * actionable advice tied to London tube context: rain → tube preferred,
+ * snow → expect delays, fog → check status, thunder → take shelter.
+ */
+private fun weatherHintText(weather: WeatherInfo): Pair<String, String> = when (weather.icon) {
+    "09d", "09n", "10d", "10n" -> "Rain expected" to "Tube preferred — leave a few minutes earlier"
+    "13d", "13n" -> "Snow forecast" to "Expect delays · check line status before travelling"
+    "11d", "11n" -> "Thunderstorm warning" to "Consider waiting if your route involves walking"
+    "50d", "50n" -> "Foggy conditions" to "Visibility low · allow extra time"
+    else -> "${weather.condition} · ${weather.temperature}°" to "Check status before heading out"
 }

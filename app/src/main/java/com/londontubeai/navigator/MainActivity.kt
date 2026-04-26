@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
 
     private var isReady by mutableStateOf(false)
     private var showOnboarding by mutableStateOf(false)
+    private var showConsent by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
@@ -42,6 +43,7 @@ class MainActivity : ComponentActivity() {
         splashScreen.setKeepOnScreenCondition { !isReady }
 
         lifecycleScope.launch {
+            showConsent = !appPreferences.consentDecisionMade.first()
             showOnboarding = !appPreferences.onboardingComplete.first()
             isReady = true
         }
@@ -71,6 +73,7 @@ class MainActivity : ComponentActivity() {
                     AppNavigation(
                         networkMonitor = networkMonitor,
                         startOnboarding = showOnboarding,
+                        startConsent = showConsent,
                         appPreferences = appPreferences,
                         iconGradientStart = Color(iconOption.gradientStart),
                         iconGradientEnd = Color(iconOption.gradientEnd),

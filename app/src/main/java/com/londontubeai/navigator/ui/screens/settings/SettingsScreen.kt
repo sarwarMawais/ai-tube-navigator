@@ -112,6 +112,12 @@ import com.londontubeai.navigator.ui.components.UnifiedHeader
 import kotlinx.coroutines.launch
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -129,6 +135,24 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+
+    // GDPR data export/delete state
+    var exportJson by remember { mutableStateOf("") }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null && exportJson.isNotEmpty()) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.write(exportJson.toByteArray(Charsets.UTF_8))
+                }
+            }.onFailure {
+                scope.launch { snackbarHostState.showSnackbar("Export failed — please try again") }
+            }
+            exportJson = ""
+        }
+    }
 
     // Station picker state
     var showStationPicker by remember { mutableStateOf(false) }
@@ -514,6 +538,30 @@ fun SettingsScreen(
                             }
                         },
                     )
+                    SettingsDivider()
+                    SettingsNavItem(
+                        title = "Export My Data",
+                        description = "Download your preferences & journeys as JSON (GDPR Art. 20)",
+                        icon = Icons.Filled.FileDownload,
+                        iconColor = TubeSecondary,
+                        value = "",
+                        onClick = {
+                            scope.launch {
+                                val json = viewModel.getExportJson()
+                                exportJson = json
+                                exportLauncher.launch("ai_tube_navigator_data.json")
+                            }
+                        },
+                    )
+                    SettingsDivider()
+                    SettingsNavItem(
+                        title = "Delete All My Data",
+                        description = "Permanently erase all preferences, journeys & cache (GDPR Art. 17)",
+                        icon = Icons.Filled.DeleteForever,
+                        iconColor = StatusSevere,
+                        value = "",
+                        onClick = { showDeleteConfirm = true },
+                    )
                 }
             }
 
@@ -659,6 +707,7 @@ fun SettingsScreen(
                             Column {
                                 Text("AI Tube Navigator v1.0.0", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                 Text("Powered by TfL Open API · On-device AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                                Text("Unofficial · uses TfL Open Data · Not affiliated with TfL", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 10.sp)
                             }
                         }
                     }
@@ -669,6 +718,38 @@ fun SettingsScreen(
         }
     }
     } // end Scaffold
+
+    // ── Delete All Data Confirmation Dialog ─────────────────
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete all data?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "This will permanently erase all your preferences, saved journeys, and cached data. This cannot be undone.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        scope.launch {
+                            viewModel.deleteAllUserData()
+                            snackbarHostState.showSnackbar("All your data has been deleted")
+                        }
+                    },
+                ) {
+                    Text("Delete", color = StatusSevere, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 
     // ── Station Picker Bottom Sheet ────────────────────────
     if (showStationPicker) {
