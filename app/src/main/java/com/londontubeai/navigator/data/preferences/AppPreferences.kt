@@ -46,6 +46,7 @@ class AppPreferences @Inject constructor(
         private val KEY_MAP_STYLE = stringPreferencesKey("map_style")
         private val KEY_MAP_LINE_FILTER = stringPreferencesKey("map_line_filter")
         private val KEY_RECENT_MAP_PLACES = stringPreferencesKey("recent_map_places")
+        private val KEY_APP_LANGUAGE = stringPreferencesKey("app_language")
         // Privacy opt-out toggles (GDPR). Default = off (opt-in explicit).
         // Even though we don't currently send analytics, we keep these
         // persisted so the UX promise to users is honoured the moment we do.
@@ -82,6 +83,7 @@ class AppPreferences @Inject constructor(
     val mapStyle: Flow<String> = context.dataStore.data.map { it[KEY_MAP_STYLE] ?: "NORMAL" }
     val mapLineFilter: Flow<String?> = context.dataStore.data.map { it[KEY_MAP_LINE_FILTER] }
     val recentMapPlaces: Flow<String> = context.dataStore.data.map { it[KEY_RECENT_MAP_PLACES] ?: "" }
+    val appLanguageTag: Flow<String?> = context.dataStore.data.map { it[KEY_APP_LANGUAGE] }
     val analyticsEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_ANALYTICS_ENABLED] ?: false }
     val crashReportsEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_CRASH_REPORTS_ENABLED] ?: false }
     val personalisationEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_PERSONALISATION_ENABLED] ?: true }
@@ -206,6 +208,13 @@ class AppPreferences @Inject constructor(
         context.dataStore.edit { it[KEY_RECENT_MAP_PLACES] = value }
     }
 
+    suspend fun setAppLanguageTag(value: String?) {
+        context.dataStore.edit {
+            if (value.isNullOrBlank()) it.remove(KEY_APP_LANGUAGE)
+            else it[KEY_APP_LANGUAGE] = value
+        }
+    }
+
     suspend fun clearAll() {
         context.dataStore.edit { it.clear() }
     }
@@ -231,6 +240,7 @@ class AppPreferences @Inject constructor(
             put("favourite_stations", data[KEY_FAVOURITE_STATIONS] ?: "")
             put("max_walking_metres", data[KEY_MAX_WALKING_METRES] ?: 500)
             put("max_interchanges", data[KEY_MAX_INTERCHANGES] ?: 3)
+            put("app_language", data[KEY_APP_LANGUAGE])
             put("analytics_enabled", data[KEY_ANALYTICS_ENABLED] ?: false)
             put("crash_reports_enabled", data[KEY_CRASH_REPORTS_ENABLED] ?: false)
             put("personalisation_enabled", data[KEY_PERSONALISATION_ENABLED] ?: true)

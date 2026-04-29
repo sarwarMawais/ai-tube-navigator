@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- App identity -->
     <string name="app_name">London Tube AI</string>
+
+    <!-- Bottom navigation -->
     <string name="home">Home</string>
     <string name="route">Route</string>
     <string name="status">Status</string>
     <string name="stations">Stations</string>
     <string name="settings">Settings</string>
+
+    <!-- Existing generic -->
     <string name="plan_journey">Plan Your Journey</string>
     <string name="from">From</string>
     <string name="to">To</string>
@@ -24,4 +29,192 @@
     <string name="zone">Zone %1$s</string>
     <string name="line_status">Line Status</string>
     <string name="all_lines">All Lines</string>
+
+    <!-- Common actions -->
+    <string name="action_cancel">Cancel</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_save">Save</string>
+    <string name="action_close">Close</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_back">Back</string>
+    <string name="action_skip">Skip</string>
+    <string name="action_try_again">Try Again</string>
+    <string name="action_get_started">Get Started</string>
+
+    <!-- Language settings (existing) -->
+    <string name="app_language">App Language</string>
+    <string name="app_language_description">Choose the language used by the app interface</string>
+    <string name="follow_system">Follow System</string>
+    <string name="choose_app_language">Choose App Language</string>
+
+    <!-- Settings header & overview -->
+    <string name="settings_subtitle">Personalise your experience</string>
+
+    <!-- Settings: upgrade banner -->
+    <string name="upgrade_to_pro">Upgrade to Pro</string>
+    <string name="upgrade_to_pro_desc">Unlock AI predictions, live alerts &amp; more</string>
+    <string name="get_pro">Get Pro</string>
+
+    <!-- Settings: section titles -->
+    <string name="section_route_preferences">Route Preferences</string>
+    <string name="section_your_commute">Your Commute</string>
+    <string name="section_appearance">Appearance</string>
+    <string name="section_notifications">Notifications</string>
+    <string name="section_location">Location</string>
+    <string name="section_data_storage">Data &amp; Storage</string>
+    <string name="section_support_community">Support &amp; Community</string>
+    <string name="section_privacy_about">Privacy &amp; About</string>
+
+    <!-- Settings: route preferences -->
+    <string name="setting_fastest_route">Fastest Route</string>
+    <string name="setting_fastest_route_desc">Prioritise the quickest journey time</string>
+    <string name="setting_avoid_crowds">Avoid Crowds</string>
+    <string name="setting_avoid_crowds_desc">AI suggests less crowded routes and times</string>
+    <string name="setting_less_walking">Less Walking</string>
+    <string name="setting_less_walking_desc">Prefer routes with shorter walking distances</string>
+    <string name="setting_step_free">Step-Free Access</string>
+    <string name="setting_step_free_desc">Only show step-free routes (lifts, ramps)</string>
+    <string name="setting_max_walking">Max Walking Distance</string>
+    <string name="setting_max_interchanges">Max Interchanges</string>
+
+    <!-- Settings: commute -->
+    <string name="setting_home_station">Home Station</string>
+    <string name="setting_home_station_desc">Set your home station for quick routes</string>
+    <string name="setting_work_station">Work Station</string>
+    <string name="setting_work_station_desc">Set your work station for commute insights</string>
+    <string name="tap_to_set">Tap to set</string>
+    <string name="select_home_station">Select Home Station</string>
+    <string name="select_work_station">Select Work Station</string>
+
+    <!-- Settings: appearance -->
+    <string name="setting_high_contrast">High Contrast</string>
+    <string name="setting_high_contrast_desc">Increase contrast for better visibility</string>
+    <string name="setting_large_text">Large Text</string>
+    <string name="setting_large_text_desc">Increase font size throughout the app</string>
+
+    <!-- Settings: notifications -->
+    <string name="setting_disruption_alerts">Disruption Alerts</string>
+    <string name="setting_disruption_alerts_desc">Get notified when your lines are disrupted</string>
+    <string name="setting_severe_only">Severe Disruptions Only</string>
+    <string name="setting_severe_only_desc">Only notify for major service issues</string>
+    <string name="setting_commute_reminders">Commute Reminders</string>
+    <string name="setting_commute_reminders_desc">Time-to-leave and commute status alerts</string>
+    <string name="setting_ai_tips">AI Tips &amp; Insights</string>
+    <string name="setting_ai_tips_desc">Personalised AI-powered travel suggestions</string>
+    <string name="setting_quiet_hours">Quiet Hours</string>
+    <string name="setting_quiet_hours_desc">No notifications between 22:00–07:00</string>
+
+    <!-- Settings: location -->
+    <string name="setting_live_location">Live Location</string>
+    <string name="setting_live_location_desc">Use GPS for nearby stations and real-time ETAs</string>
+
+    <!-- Settings: data & storage -->
+    <string name="setting_clear_cache">Clear Cache</string>
+    <string name="setting_clear_cache_desc">Free up storage by clearing cached data</string>
+    <string name="setting_reset_preferences">Reset Preferences</string>
+    <string name="setting_reset_preferences_desc">Restore all settings to defaults</string>
+    <string name="setting_export_data">Export My Data</string>
+    <string name="setting_export_data_desc">Download your preferences &amp; journeys as JSON (GDPR Art. 20)</string>
+    <string name="setting_delete_data">Delete All My Data</string>
+    <string name="setting_delete_data_desc">Permanently erase all preferences, journeys &amp; cache (GDPR Art. 17)</string>
+    <string name="snack_cache_cleared">Cache cleared successfully</string>
+    <string name="snack_preferences_reset">Preferences reset to defaults</string>
+    <string name="snack_data_deleted">All your data has been deleted</string>
+    <string name="snack_export_failed">Export failed — please try again</string>
+    <string name="dialog_delete_all_title">Delete all data?</string>
+    <string name="dialog_delete_all_message">This will permanently erase all your preferences, saved journeys, and cached data. This cannot be undone.</string>
+
+    <!-- Settings: support -->
+    <string name="setting_rate_app">Rate the App</string>
+    <string name="setting_rate_app_desc">Love it? Leave a 5-star review on Google Play</string>
+    <string name="setting_share_app">Share the App</string>
+    <string name="setting_share_app_desc">Tell your friends about AI Tube Navigator</string>
+    <string name="setting_send_feedback">Send Feedback</string>
+    <string name="setting_send_feedback_desc">Ideas or general questions? Drop us a line</string>
+    <string name="setting_report_bug">Report a Bug</string>
+    <string name="setting_report_bug_desc">Something not working? Let us know</string>
+    <string name="chooser_share_app">Share app</string>
+    <string name="chooser_send_feedback">Send feedback</string>
+    <string name="chooser_report_bug">Report a bug</string>
+    <string name="snack_no_email_app">No email app installed</string>
+
+    <!-- Settings: privacy & about -->
+    <string name="setting_privacy_policy">Privacy Policy</string>
+    <string name="setting_privacy_policy_desc">GDPR compliance &amp; data handling</string>
+    <string name="setting_terms">Terms of Service</string>
+    <string name="setting_terms_desc">Usage terms and conditions</string>
+    <string name="setting_licenses">Open-Source Licences</string>
+    <string name="setting_licenses_desc">Third-party libraries used in this app</string>
+    <string name="app_version_line">AI Tube Navigator v1.0.0</string>
+    <string name="app_tagline">Powered by TfL Open API · On-device AI</string>
+    <string name="app_disclaimer">Unofficial · uses TfL Open Data · Not affiliated with TfL</string>
+
+    <!-- Consent screen -->
+    <string name="consent_title">Your Privacy Matters</string>
+    <string name="consent_intro">Before you start, please choose what data you\'re happy to share. You can change these any time in Settings → Privacy.</string>
+    <string name="consent_always_on">Always on</string>
+    <string name="consent_always_on_desc">We use your location to find nearby stations, fetch live TfL data, and store your preferences on your device. None of this is shared with us.</string>
+    <string name="consent_analytics">Anonymous usage analytics</string>
+    <string name="consent_analytics_desc">Helps us understand which features people use so we can improve the app. No personal data, no tracking across other apps.</string>
+    <string name="consent_crash">Crash reports</string>
+    <string name="consent_crash_desc">Sends anonymous crash logs when the app stops working, so we can fix bugs faster. No journey data is included.</string>
+    <string name="consent_read_policy">Read our full privacy policy</string>
+    <string name="consent_accept_all">Accept all</string>
+    <string name="consent_save_choices">Save my choices</string>
+    <string name="consent_decline_all">Decline all (still use the app)</string>
+    <string name="consent_footer">We never sell your data. You can change your choices any time from Settings → Privacy.</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_page_counter">%1$d of %2$d</string>
+    <string name="onboarding_welcome_title">Welcome</string>
+    <string name="onboarding_welcome_sub">Your Intelligent Underground Companion</string>
+    <string name="onboarding_welcome_desc">Navigate London\'s Tube smarter with AI-powered routing, real-time updates, and personalised journey planning.</string>
+    <string name="onboarding_smart_title">Smart Route Planning</string>
+    <string name="onboarding_smart_sub">AI That Learns Your Preferences</string>
+    <string name="onboarding_smart_desc">Graph-based pathfinding with real interchange times, crowd-aware routing, and time predictions that adapt to peak hours.</string>
+    <string name="onboarding_map_title">Live Network Map</string>
+    <string name="onboarding_map_sub">The Entire Tube at a Glance</string>
+    <string name="onboarding_map_desc">Interactive map with real-time status overlays, station details, and line filtering. Tap any station for instant information.</string>
+    <string name="onboarding_offline_title">Works Underground</string>
+    <string name="onboarding_offline_sub">No Signal? No Problem</string>
+    <string name="onboarding_offline_desc">Full offline routing, cached predictions, and station data in tunnels. The app detects connectivity and switches seamlessly.</string>
+    <string name="onboarding_commute_title">Set up your commute</string>
+    <string name="onboarding_commute_desc">We\'ll show live travel time and disruption alerts for your daily journey.</string>
+    <string name="onboarding_commute_optional">Optional · you can set these later in Settings</string>
+    <string name="onboarding_accessibility_title">Accessibility</string>
+    <string name="onboarding_accessibility_desc">Need step-free access? We\'ll prefer routes with lifts and avoid stairs whenever possible.</string>
+    <string name="onboarding_accessibility_prefer">Prefer step-free routes</string>
+    <string name="onboarding_accessibility_prefer_desc">Lifts only · avoid stairs and escalators</string>
+    <string name="onboarding_accessibility_change">You can change this any time in Settings</string>
+    <string name="onboarding_home_label">Home</string>
+    <string name="onboarding_work_label">Work</string>
+    <string name="onboarding_choose_label_station">Choose %1$s station</string>
+    <string name="onboarding_no_stations_match">No stations match \"%1$s\"</string>
+    <string name="onboarding_search_hint">Search stations…</string>
+
+    <!-- Benefits shown on onboarding pages -->
+    <string name="benefit_ai_routes">AI Routes</string>
+    <string name="benefit_ai_routes_desc">Fastest path with live data</string>
+    <string name="benefit_alerts">Alerts</string>
+    <string name="benefit_alerts_desc">Disruption notifications</string>
+    <string name="benefit_smart_tips">Smart Tips</string>
+    <string name="benefit_smart_tips_desc">Carriage &amp; exit advice</string>
+    <string name="benefit_peak_avoidance">Peak Avoidance</string>
+    <string name="benefit_peak_avoidance_desc">Skip busy connections</string>
+    <string name="benefit_exit_guidance">Exit Guidance</string>
+    <string name="benefit_exit_guidance_desc">Optimal carriage position</string>
+    <string name="benefit_time_saved">Time Saved</string>
+    <string name="benefit_time_saved_desc">Up to 5 min per trip</string>
+    <string name="benefit_realtime">Real-time</string>
+    <string name="benefit_realtime_desc">Live status overlays</string>
+    <string name="benefit_station_info">Station Info</string>
+    <string name="benefit_station_info_desc">Tap for instant details</string>
+    <string name="benefit_smart_filter">Smart Filter</string>
+    <string name="benefit_smart_filter_desc">By line or status</string>
+    <string name="benefit_offline_data">Offline Data</string>
+    <string name="benefit_offline_data_desc">Routes cached locally</string>
+    <string name="benefit_auto_switch">Auto Switch</string>
+    <string name="benefit_auto_switch_desc">Online ↔ offline seamless</string>
+    <string name="benefit_tunnel_ready">Tunnel Ready</string>
+    <string name="benefit_tunnel_ready_desc">Works without signal</string>
 </resources>

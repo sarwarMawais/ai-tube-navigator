@@ -51,6 +51,7 @@ data class SettingsPrefsState(
     val darkMode: String = "system",
     val highContrast: Boolean = false,
     val largeText: Boolean = false,
+    val appLanguageTag: String? = null,
     // Location
     val liveLocation: Boolean = false,
 )
@@ -117,8 +118,9 @@ class SettingsViewModel @Inject constructor(
         combine(
             prefs.maxWalkingMetres,
             prefs.maxInterchanges,
-        ) { walk, inter ->
-            PartialD(walk, inter)
+            prefs.appLanguageTag,
+        ) { walk, inter, languageTag ->
+            PartialD(walk, inter, languageTag)
         }
     ) { abc, d ->
         SettingsPrefsState(
@@ -140,6 +142,7 @@ class SettingsViewModel @Inject constructor(
             darkMode = abc.ab.b.dark,
             highContrast = abc.c.contrast,
             largeText = abc.c.text,
+            appLanguageTag = d.languageTag,
             liveLocation = abc.c.loc,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SettingsPrefsState())
@@ -180,6 +183,7 @@ class SettingsViewModel @Inject constructor(
     suspend fun setQuietHours(v: Boolean) = prefs.setQuietHours(v)
     // Appearance
     suspend fun setDarkMode(v: String) = prefs.setDarkMode(v)
+    suspend fun setAppLanguage(v: String?) = prefs.setAppLanguageTag(v)
 
     suspend fun setHighContrast(v: Boolean) = prefs.setHighContrast(v)
     suspend fun setLargeText(v: Boolean) = prefs.setLargeText(v)
@@ -221,7 +225,7 @@ class SettingsViewModel @Inject constructor(
     private data class PartialA(val fastest: Boolean, val crowds: Boolean, val walking: Boolean, val stepFree: Boolean, val disruptions: Boolean)
     private data class PartialB(val commute: Boolean, val aiTips: Boolean, val homeId: String?, val workId: String?, val dark: String)
     private data class PartialC(val contrast: Boolean, val text: Boolean, val loc: Boolean, val quiet: Boolean, val severe: Boolean)
-    private data class PartialD(val walk: Int, val inter: Int)
+    private data class PartialD(val walk: Int, val inter: Int, val languageTag: String?)
     private data class PartialAB(val a: PartialA, val b: PartialB)
     private data class PartialABC(val ab: PartialAB, val c: PartialC)
 }

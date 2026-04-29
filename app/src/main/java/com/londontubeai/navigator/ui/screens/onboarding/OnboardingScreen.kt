@@ -96,7 +96,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.annotation.StringRes
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import com.londontubeai.navigator.R
 import com.londontubeai.navigator.data.model.Station
 import com.londontubeai.navigator.data.model.TubeData
 import com.londontubeai.navigator.ui.components.SystemBarsEffect
@@ -109,9 +112,9 @@ import kotlin.math.abs
 private data class OnboardingPage(
     val icon: ImageVector,
     val accentColor: Color,
-    val title: String,
-    val subtitle: String,
-    val description: String,
+    @StringRes val titleRes: Int,
+    @StringRes val subtitleRes: Int,
+    @StringRes val descriptionRes: Int,
     val benefits: List<Benefit>,
     val gradientStart: Color,
     val gradientEnd: Color,
@@ -119,8 +122,8 @@ private data class OnboardingPage(
 
 private data class Benefit(
     val icon: ImageVector,
-    val label: String,
-    val detail: String,
+    @StringRes val labelRes: Int,
+    @StringRes val detailRes: Int,
 )
 
 // ─── Page Content ─────────────────────────────────────────────
@@ -129,13 +132,13 @@ private val pages = listOf(
     OnboardingPage(
         icon = Icons.Filled.DirectionsSubway,
         accentColor = TubePrimary,
-        title = "Welcome",
-        subtitle = "Your Intelligent Underground Companion",
-        description = "Navigate London's Tube smarter with AI-powered routing, real-time updates, and personalised journey planning.",
+        titleRes = R.string.onboarding_welcome_title,
+        subtitleRes = R.string.onboarding_welcome_sub,
+        descriptionRes = R.string.onboarding_welcome_desc,
         benefits = listOf(
-            Benefit(Icons.Filled.Route, "AI Routes", "Fastest path with live data"),
-            Benefit(Icons.Filled.Notifications, "Alerts", "Disruption notifications"),
-            Benefit(Icons.Filled.Lightbulb, "Smart Tips", "Carriage & exit advice"),
+            Benefit(Icons.Filled.Route, R.string.benefit_ai_routes, R.string.benefit_ai_routes_desc),
+            Benefit(Icons.Filled.Notifications, R.string.benefit_alerts, R.string.benefit_alerts_desc),
+            Benefit(Icons.Filled.Lightbulb, R.string.benefit_smart_tips, R.string.benefit_smart_tips_desc),
         ),
         gradientStart = TubePrimary,
         gradientEnd = TubeAccent,
@@ -143,13 +146,13 @@ private val pages = listOf(
     OnboardingPage(
         icon = Icons.Filled.Route,
         accentColor = StatusGood,
-        title = "Smart Route Planning",
-        subtitle = "AI That Learns Your Preferences",
-        description = "Graph-based pathfinding with real interchange times, crowd-aware routing, and time predictions that adapt to peak hours.",
+        titleRes = R.string.onboarding_smart_title,
+        subtitleRes = R.string.onboarding_smart_sub,
+        descriptionRes = R.string.onboarding_smart_desc,
         benefits = listOf(
-            Benefit(Icons.Filled.AccessTime, "Peak Avoidance", "Skip busy connections"),
-            Benefit(Icons.Filled.LocationOn, "Exit Guidance", "Optimal carriage position"),
-            Benefit(Icons.Filled.Timer, "Time Saved", "Up to 5 min per trip"),
+            Benefit(Icons.Filled.AccessTime, R.string.benefit_peak_avoidance, R.string.benefit_peak_avoidance_desc),
+            Benefit(Icons.Filled.LocationOn, R.string.benefit_exit_guidance, R.string.benefit_exit_guidance_desc),
+            Benefit(Icons.Filled.Timer, R.string.benefit_time_saved, R.string.benefit_time_saved_desc),
         ),
         gradientStart = StatusGood,
         gradientEnd = TubePrimary,
@@ -157,13 +160,13 @@ private val pages = listOf(
     OnboardingPage(
         icon = Icons.Filled.Map,
         accentColor = TubeSecondary,
-        title = "Live Network Map",
-        subtitle = "The Entire Tube at a Glance",
-        description = "Interactive map with real-time status overlays, station details, and line filtering. Tap any station for instant information.",
+        titleRes = R.string.onboarding_map_title,
+        subtitleRes = R.string.onboarding_map_sub,
+        descriptionRes = R.string.onboarding_map_desc,
         benefits = listOf(
-            Benefit(Icons.Filled.Wifi, "Real-time", "Live status overlays"),
-            Benefit(Icons.Filled.Info, "Station Info", "Tap for instant details"),
-            Benefit(Icons.Filled.FilterList, "Smart Filter", "By line or status"),
+            Benefit(Icons.Filled.Wifi, R.string.benefit_realtime, R.string.benefit_realtime_desc),
+            Benefit(Icons.Filled.Info, R.string.benefit_station_info, R.string.benefit_station_info_desc),
+            Benefit(Icons.Filled.FilterList, R.string.benefit_smart_filter, R.string.benefit_smart_filter_desc),
         ),
         gradientStart = TubeSecondary,
         gradientEnd = TubeAccent,
@@ -171,13 +174,13 @@ private val pages = listOf(
     OnboardingPage(
         icon = Icons.Filled.CloudOff,
         accentColor = Color(0xFF6C63FF),
-        title = "Works Underground",
-        subtitle = "No Signal? No Problem",
-        description = "Full offline routing, cached predictions, and station data in tunnels. The app detects connectivity and switches seamlessly.",
+        titleRes = R.string.onboarding_offline_title,
+        subtitleRes = R.string.onboarding_offline_sub,
+        descriptionRes = R.string.onboarding_offline_desc,
         benefits = listOf(
-            Benefit(Icons.Filled.Storage, "Offline Data", "Routes cached locally"),
-            Benefit(Icons.Filled.Sync, "Auto Switch", "Online ↔ offline seamless"),
-            Benefit(Icons.Filled.SignalWifiOff, "Tunnel Ready", "Works without signal"),
+            Benefit(Icons.Filled.Storage, R.string.benefit_offline_data, R.string.benefit_offline_data_desc),
+            Benefit(Icons.Filled.Sync, R.string.benefit_auto_switch, R.string.benefit_auto_switch_desc),
+            Benefit(Icons.Filled.SignalWifiOff, R.string.benefit_tunnel_ready, R.string.benefit_tunnel_ready_desc),
         ),
         gradientStart = Color(0xFF6C63FF),
         gradientEnd = StatusGood,
@@ -405,7 +408,7 @@ private fun PageContent(page: OnboardingPage) {
         Spacer(modifier = Modifier.height(28.dp))
 
         Text(
-            text = page.title,
+            text = stringResource(page.titleRes),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.ExtraBold,
             color = Color.White,
@@ -413,7 +416,7 @@ private fun PageContent(page: OnboardingPage) {
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = page.subtitle,
+            text = stringResource(page.subtitleRes),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = Color.White.copy(alpha = 0.75f),
@@ -421,7 +424,7 @@ private fun PageContent(page: OnboardingPage) {
         )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = page.description,
+            text = stringResource(page.descriptionRes),
             style = MaterialTheme.typography.bodyMedium,
             color = Color.White.copy(alpha = 0.65f),
             textAlign = TextAlign.Center,
@@ -483,13 +486,13 @@ private fun BenefitRow(benefit: Benefit, accentColor: Color, delayMs: Int) {
         Spacer(modifier = Modifier.width(12.dp))
         Column {
             Text(
-                text = benefit.label,
+                text = stringResource(benefit.labelRes),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 color = Color.White.copy(alpha = alpha),
             )
             Text(
-                text = benefit.detail,
+                text = stringResource(benefit.detailRes),
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.White.copy(alpha = 0.6f * alpha),
             )
@@ -551,7 +554,7 @@ private fun NavigationSection(
         elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp, pressedElevation = 2.dp),
     ) {
         Text(
-            text = if (isLast) "Get Started" else "Continue",
+            text = if (isLast) stringResource(R.string.action_get_started) else stringResource(R.string.action_continue),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
         )
@@ -572,7 +575,7 @@ private fun NavigationSection(
     ) {
         if (currentPage > 0) {
             TextButton(onClick = onBack) {
-                Text("Back", color = Color.White.copy(alpha = 0.6f))
+                Text(stringResource(R.string.action_back), color = Color.White.copy(alpha = 0.6f))
             }
         } else {
             Spacer(modifier = Modifier.width(1.dp))
@@ -580,7 +583,7 @@ private fun NavigationSection(
 
         if (!isLast) {
             TextButton(onClick = onSkip) {
-                Text("Skip", color = Color.White.copy(alpha = 0.6f))
+                Text(stringResource(R.string.action_skip), color = Color.White.copy(alpha = 0.6f))
             }
         } else {
             Spacer(modifier = Modifier.width(1.dp))
@@ -622,7 +625,7 @@ private fun CommuteSetupContent(viewModel: OnboardingViewModel) {
         Spacer(modifier = Modifier.height(20.dp))
 
         Text(
-            text = "Set up your commute",
+            text = stringResource(R.string.onboarding_commute_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.ExtraBold,
             color = Color.White,
@@ -630,7 +633,7 @@ private fun CommuteSetupContent(viewModel: OnboardingViewModel) {
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "We'll show live travel time and disruption alerts for your daily journey.",
+            text = stringResource(R.string.onboarding_commute_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = Color.White.copy(alpha = 0.7f),
             textAlign = TextAlign.Center,
@@ -642,7 +645,7 @@ private fun CommuteSetupContent(viewModel: OnboardingViewModel) {
 
         // Home picker
         StationPickerRow(
-            label = "Home",
+            label = stringResource(R.string.onboarding_home_label),
             icon = Icons.Filled.Home,
             selected = homeStation,
             accent = TubePrimary,
@@ -654,7 +657,7 @@ private fun CommuteSetupContent(viewModel: OnboardingViewModel) {
 
         // Work picker
         StationPickerRow(
-            label = "Work",
+            label = stringResource(R.string.onboarding_work_label),
             icon = Icons.Filled.Business,
             selected = workStation,
             accent = TubeAccent,
@@ -665,7 +668,7 @@ private fun CommuteSetupContent(viewModel: OnboardingViewModel) {
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Optional · you can set these later in Settings",
+            text = stringResource(R.string.onboarding_commute_optional),
             style = MaterialTheme.typography.labelSmall,
             color = Color.White.copy(alpha = 0.5f),
         )
@@ -785,7 +788,7 @@ private fun StationPickerSheet(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Choose $label station",
+                    stringResource(R.string.onboarding_choose_label_station, label),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -799,7 +802,7 @@ private fun StationPickerSheet(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Search stations…", color = Color.White.copy(alpha = 0.5f)) },
+                placeholder = { Text(stringResource(R.string.onboarding_search_hint), color = Color.White.copy(alpha = 0.5f)) },
                 leadingIcon = { Icon(Icons.Filled.Search, null, tint = Color.White.copy(alpha = 0.7f)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -864,7 +867,7 @@ private fun StationPickerSheet(
                 if (results.isEmpty()) {
                     item {
                         Text(
-                            "No stations match \"$query\"",
+                            stringResource(R.string.onboarding_no_stations_match, query),
                             color = Color.White.copy(alpha = 0.6f),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -906,14 +909,14 @@ private fun AccessibilitySetupContent(viewModel: OnboardingViewModel) {
         Spacer(modifier = Modifier.height(20.dp))
 
         Text(
-            text = "Accessibility",
+            text = stringResource(R.string.onboarding_accessibility_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.ExtraBold,
             color = Color.White,
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "Need step-free access? We'll prefer routes with lifts and avoid stairs whenever possible.",
+            text = stringResource(R.string.onboarding_accessibility_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = Color.White.copy(alpha = 0.7f),
             textAlign = TextAlign.Center,
@@ -955,13 +958,13 @@ private fun AccessibilitySetupContent(viewModel: OnboardingViewModel) {
                 Spacer(modifier = Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Prefer step-free routes",
+                        stringResource(R.string.onboarding_accessibility_prefer),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
                     )
                     Text(
-                        "Lifts only · avoid stairs and escalators",
+                        stringResource(R.string.onboarding_accessibility_prefer_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.6f),
                     )
@@ -983,7 +986,7 @@ private fun AccessibilitySetupContent(viewModel: OnboardingViewModel) {
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-            text = "You can change this any time in Settings",
+            text = stringResource(R.string.onboarding_accessibility_change),
             style = MaterialTheme.typography.labelSmall,
             color = Color.White.copy(alpha = 0.5f),
         )

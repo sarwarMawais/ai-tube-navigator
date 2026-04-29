@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Warning
@@ -95,12 +96,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.londontubeai.navigator.R
 import com.londontubeai.navigator.data.model.TubeData
+import com.londontubeai.navigator.localization.AppLanguageManager
 import com.londontubeai.navigator.ui.appicon.AppIconManager
 import com.londontubeai.navigator.ui.theme.StatusGood
 import com.londontubeai.navigator.ui.theme.StatusSevere
@@ -110,6 +114,7 @@ import com.londontubeai.navigator.ui.theme.TubePrimary
 import com.londontubeai.navigator.ui.theme.TubeSecondary
 import com.londontubeai.navigator.ui.components.UnifiedHeader
 import kotlinx.coroutines.launch
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -148,7 +153,7 @@ fun SettingsScreen(
                     stream.write(exportJson.toByteArray(Charsets.UTF_8))
                 }
             }.onFailure {
-                scope.launch { snackbarHostState.showSnackbar("Export failed — please try again") }
+                scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.snack_export_failed)) }
             }
             exportJson = ""
         }
@@ -157,6 +162,7 @@ fun SettingsScreen(
     // Station picker state
     var showStationPicker by remember { mutableStateOf(false) }
     var stationPickerTarget by remember { mutableStateOf("home") } // "home" or "work"
+    var showLanguagePicker by remember { mutableStateOf(false) }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -166,8 +172,8 @@ fun SettingsScreen(
     Column(modifier = Modifier.fillMaxSize().padding(scaffoldPadding)) {
         // ── Unified Header ────────────────────────────
         UnifiedHeader(
-            title = "Settings",
-            subtitle = "Personalise your experience",
+            title = stringResource(R.string.settings),
+            subtitle = stringResource(R.string.settings_subtitle),
             icon = Icons.Filled.SettingsPhone,
         )
 
@@ -252,13 +258,13 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.width(14.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    "Upgrade to Pro",
+                                    stringResource(R.string.upgrade_to_pro),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Color.White,
                                 )
                                 Text(
-                                    "Unlock AI predictions, live alerts & more",
+                                    stringResource(R.string.upgrade_to_pro_desc),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color.White.copy(alpha = 0.88f),
                                 )
@@ -268,7 +274,7 @@ fun SettingsScreen(
                                 color = Color.White.copy(alpha = 0.22f),
                             ) {
                                 Text(
-                                    "Get Pro",
+                                    stringResource(R.string.get_pro),
                                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
@@ -287,12 +293,12 @@ fun SettingsScreen(
             // ═══════════════════════════════════════════════════
             // 1. ROUTE PREFERENCES
             // ═══════════════════════════════════════════════════
-            item { SectionTitle("Route Preferences") }
+            item { SectionTitle(stringResource(R.string.section_route_preferences)) }
             item {
                 SettingsCard {
                     SettingsToggle(
-                        title = "Fastest Route",
-                        description = "Prioritise the quickest journey time",
+                        title = stringResource(R.string.setting_fastest_route),
+                        description = stringResource(R.string.setting_fastest_route_desc),
                         icon = Icons.Filled.Speed,
                         iconColor = TubePrimary,
                         checked = prefs.preferFastest,
@@ -300,8 +306,8 @@ fun SettingsScreen(
                     )
                     SettingsDivider()
                     SettingsToggle(
-                        title = "Avoid Crowds",
-                        description = "AI suggests less crowded routes and times",
+                        title = stringResource(R.string.setting_avoid_crowds),
+                        description = stringResource(R.string.setting_avoid_crowds_desc),
                         icon = Icons.Filled.Group,
                         iconColor = TubeSecondary,
                         checked = prefs.preferLessCrowds,
@@ -309,8 +315,8 @@ fun SettingsScreen(
                     )
                     SettingsDivider()
                     SettingsToggle(
-                        title = "Less Walking",
-                        description = "Prefer routes with shorter walking distances",
+                        title = stringResource(R.string.setting_less_walking),
+                        description = stringResource(R.string.setting_less_walking_desc),
                         icon = Icons.AutoMirrored.Filled.DirectionsWalk,
                         iconColor = StatusGood,
                         checked = prefs.preferLessWalking,
@@ -318,8 +324,8 @@ fun SettingsScreen(
                     )
                     SettingsDivider()
                     SettingsToggle(
-                        title = "Step-Free Access",
-                        description = "Only show step-free routes (lifts, ramps)",
+                        title = stringResource(R.string.setting_step_free),
+                        description = stringResource(R.string.setting_step_free_desc),
                         icon = Icons.AutoMirrored.Filled.AccessibleForward,
                         iconColor = TubeAccent,
                         checked = prefs.preferStepFree,
@@ -331,7 +337,7 @@ fun SettingsScreen(
             item {
                 SettingsCard {
                     SettingsSlider(
-                        title = "Max Walking Distance",
+                        title = stringResource(R.string.setting_max_walking),
                         icon = Icons.AutoMirrored.Filled.DirectionsWalk,
                         iconColor = StatusGood,
                         value = prefs.maxWalkingMetres.toFloat(),
@@ -342,7 +348,7 @@ fun SettingsScreen(
                     )
                     SettingsDivider()
                     SettingsSlider(
-                        title = "Max Interchanges",
+                        title = stringResource(R.string.setting_max_interchanges),
                         icon = Icons.Filled.SwapHoriz,
                         iconColor = TubeSecondary,
                         value = prefs.maxInterchanges.toFloat(),
@@ -357,15 +363,15 @@ fun SettingsScreen(
             // ═══════════════════════════════════════════════════
             // 2. YOUR COMMUTE
             // ═══════════════════════════════════════════════════
-            item { SectionTitle("Your Commute") }
+            item { SectionTitle(stringResource(R.string.section_your_commute)) }
             item {
                 SettingsCard {
                     SettingsNavItem(
-                        title = "Home Station",
-                        description = "Set your home station for quick routes",
+                        title = stringResource(R.string.setting_home_station),
+                        description = stringResource(R.string.setting_home_station_desc),
                         icon = Icons.Filled.Home,
                         iconColor = StatusGood,
-                        value = prefs.homeStationName ?: "Tap to set",
+                        value = prefs.homeStationName ?: stringResource(R.string.tap_to_set),
                         onClick = {
                             stationPickerTarget = "home"
                             showStationPicker = true
@@ -373,11 +379,11 @@ fun SettingsScreen(
                     )
                     SettingsDivider()
                     SettingsNavItem(
-                        title = "Work Station",
-                        description = "Set your work station for commute insights",
+                        title = stringResource(R.string.setting_work_station),
+                        description = stringResource(R.string.setting_work_station_desc),
                         icon = Icons.Filled.Work,
                         iconColor = TubePrimary,
-                        value = prefs.workStationName ?: "Tap to set",
+                        value = prefs.workStationName ?: stringResource(R.string.tap_to_set),
                         onClick = {
                             stationPickerTarget = "work"
                             showStationPicker = true
@@ -389,7 +395,7 @@ fun SettingsScreen(
             // ═══════════════════════════════════════════════════
             // 3. APPEARANCE
             // ═══════════════════════════════════════════════════
-            item { SectionTitle("Appearance") }
+            item { SectionTitle(stringResource(R.string.section_appearance)) }
             item {
                 SettingsCard {
                     // Theme selector
@@ -398,9 +404,18 @@ fun SettingsScreen(
                         onSelect = { scope.launch { viewModel.setDarkMode(it) } },
                     )
                     SettingsDivider()
+                    SettingsNavItem(
+                        title = stringResource(R.string.app_language),
+                        description = stringResource(R.string.app_language_description),
+                        icon = Icons.Filled.Language,
+                        iconColor = TubeAccent,
+                        value = if (prefs.appLanguageTag == null) stringResource(R.string.follow_system) else AppLanguageManager.displayName(prefs.appLanguageTag),
+                        onClick = { showLanguagePicker = true },
+                    )
+                    SettingsDivider()
                     SettingsToggle(
-                        title = "High Contrast",
-                        description = "Increase contrast for better visibility",
+                        title = stringResource(R.string.setting_high_contrast),
+                        description = stringResource(R.string.setting_high_contrast_desc),
                         icon = Icons.Filled.Contrast,
                         iconColor = TubePrimary,
                         checked = prefs.highContrast,
@@ -408,8 +423,8 @@ fun SettingsScreen(
                     )
                     SettingsDivider()
                     SettingsToggle(
-                        title = "Large Text",
-                        description = "Increase font size throughout the app",
+                        title = stringResource(R.string.setting_large_text),
+                        description = stringResource(R.string.setting_large_text_desc),
                         icon = Icons.Filled.FormatSize,
                         iconColor = TubeSecondary,
                         checked = prefs.largeText,
@@ -424,12 +439,12 @@ fun SettingsScreen(
             // ═══════════════════════════════════════════════════
             // 4. NOTIFICATIONS
             // ═══════════════════════════════════════════════════
-            item { SectionTitle("Notifications") }
+            item { SectionTitle(stringResource(R.string.section_notifications)) }
             item {
                 SettingsCard {
                     SettingsToggle(
-                        title = "Disruption Alerts",
-                        description = "Get notified when your lines are disrupted",
+                        title = stringResource(R.string.setting_disruption_alerts),
+                        description = stringResource(R.string.setting_disruption_alerts_desc),
                         icon = Icons.Filled.Notifications,
                         iconColor = TubeAccent,
                         checked = prefs.pushDisruptions,
@@ -438,8 +453,8 @@ fun SettingsScreen(
                     SettingsDivider()
                     if (prefs.pushDisruptions) {
                         SettingsToggle(
-                            title = "Severe Disruptions Only",
-                            description = "Only notify for major service issues",
+                            title = stringResource(R.string.setting_severe_only),
+                            description = stringResource(R.string.setting_severe_only_desc),
                             icon = Icons.Filled.Warning,
                             iconColor = StatusSevere,
                             checked = prefs.severeOnly,
@@ -448,8 +463,8 @@ fun SettingsScreen(
                         SettingsDivider()
                     }
                     SettingsToggle(
-                        title = "Commute Reminders",
-                        description = "Time-to-leave and commute status alerts",
+                        title = stringResource(R.string.setting_commute_reminders),
+                        description = stringResource(R.string.setting_commute_reminders_desc),
                         icon = Icons.Filled.NotificationsActive,
                         iconColor = TubeSecondary,
                         checked = prefs.pushCommute,
@@ -458,8 +473,8 @@ fun SettingsScreen(
                     SettingsDivider()
                     if (isPremium) {
                         SettingsToggle(
-                            title = "AI Tips & Insights",
-                            description = "Personalised AI-powered travel suggestions",
+                            title = stringResource(R.string.setting_ai_tips),
+                            description = stringResource(R.string.setting_ai_tips_desc),
                             icon = Icons.Filled.Lightbulb,
                             iconColor = Color(0xFFFFA000),
                             checked = prefs.pushAiTips,
@@ -467,8 +482,8 @@ fun SettingsScreen(
                         )
                     } else {
                         SettingsLockedRow(
-                            title = "AI Tips & Insights",
-                            description = "Personalised AI-powered travel suggestions",
+                            title = stringResource(R.string.setting_ai_tips),
+                            description = stringResource(R.string.setting_ai_tips_desc),
                             icon = Icons.Filled.Lightbulb,
                             iconColor = Color(0xFFFFA000),
                             onTap = onNavigateToPremium,
@@ -477,8 +492,8 @@ fun SettingsScreen(
                     if (prefs.pushDisruptions || prefs.pushCommute || prefs.pushAiTips) {
                         SettingsDivider()
                         SettingsToggle(
-                            title = "Quiet Hours",
-                            description = "No notifications between 22:00\u201307:00",
+                            title = stringResource(R.string.setting_quiet_hours),
+                            description = stringResource(R.string.setting_quiet_hours_desc),
                             icon = Icons.Filled.DoNotDisturb,
                             iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             checked = prefs.quietHours,
@@ -491,12 +506,12 @@ fun SettingsScreen(
             // ═══════════════════════════════════════════════════
             // 5. LOCATION
             // ═══════════════════════════════════════════════════
-            item { SectionTitle("Location") }
+            item { SectionTitle(stringResource(R.string.section_location)) }
             item {
                 SettingsCard {
                     SettingsToggle(
-                        title = "Live Location",
-                        description = "Use GPS for nearby stations and real-time ETAs",
+                        title = stringResource(R.string.setting_live_location),
+                        description = stringResource(R.string.setting_live_location_desc),
                         icon = Icons.Filled.LocationOn,
                         iconColor = TubePrimary,
                         checked = prefs.liveLocation,
@@ -508,40 +523,42 @@ fun SettingsScreen(
             // ═══════════════════════════════════════════════════
             // 6. DATA & STORAGE
             // ═══════════════════════════════════════════════════
-            item { SectionTitle("Data & Storage") }
+            item { SectionTitle(stringResource(R.string.section_data_storage)) }
             item {
                 SettingsCard {
+                    val cacheClearedMsg = stringResource(R.string.snack_cache_cleared)
                     SettingsNavItem(
-                        title = "Clear Cache",
-                        description = "Free up storage by clearing cached data",
+                        title = stringResource(R.string.setting_clear_cache),
+                        description = stringResource(R.string.setting_clear_cache_desc),
                         icon = Icons.Filled.DeleteSweep,
                         iconColor = StatusSevere,
                         value = "",
                         onClick = {
                             scope.launch {
                                 viewModel.clearCache()
-                                snackbarHostState.showSnackbar("Cache cleared successfully")
+                                snackbarHostState.showSnackbar(cacheClearedMsg)
                             }
                         },
                     )
                     SettingsDivider()
+                    val prefsResetMsg = stringResource(R.string.snack_preferences_reset)
                     SettingsNavItem(
-                        title = "Reset Preferences",
-                        description = "Restore all settings to defaults",
+                        title = stringResource(R.string.setting_reset_preferences),
+                        description = stringResource(R.string.setting_reset_preferences_desc),
                         icon = Icons.Filled.SettingsPhone,
                         iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         value = "",
                         onClick = {
                             scope.launch {
                                 viewModel.resetPreferences()
-                                snackbarHostState.showSnackbar("Preferences reset to defaults")
+                                snackbarHostState.showSnackbar(prefsResetMsg)
                             }
                         },
                     )
                     SettingsDivider()
                     SettingsNavItem(
-                        title = "Export My Data",
-                        description = "Download your preferences & journeys as JSON (GDPR Art. 20)",
+                        title = stringResource(R.string.setting_export_data),
+                        description = stringResource(R.string.setting_export_data_desc),
                         icon = Icons.Filled.FileDownload,
                         iconColor = TubeSecondary,
                         value = "",
@@ -555,8 +572,8 @@ fun SettingsScreen(
                     )
                     SettingsDivider()
                     SettingsNavItem(
-                        title = "Delete All My Data",
-                        description = "Permanently erase all preferences, journeys & cache (GDPR Art. 17)",
+                        title = stringResource(R.string.setting_delete_data),
+                        description = stringResource(R.string.setting_delete_data_desc),
                         icon = Icons.Filled.DeleteForever,
                         iconColor = StatusSevere,
                         value = "",
@@ -568,12 +585,12 @@ fun SettingsScreen(
             // ═══════════════════════════════════════════════════
             // 7. SUPPORT & COMMUNITY
             // ═══════════════════════════════════════════════════
-            item { SectionTitle("Support & Community") }
+            item { SectionTitle(stringResource(R.string.section_support_community)) }
             item {
                 SettingsCard {
                     SettingsNavItem(
-                        title = "Rate the App",
-                        description = "Love it? Leave a 5-star review on Google Play",
+                        title = stringResource(R.string.setting_rate_app),
+                        description = stringResource(R.string.setting_rate_app_desc),
                         icon = Icons.Filled.RateReview,
                         iconColor = Color(0xFFFFB300),
                         value = "",
@@ -598,9 +615,10 @@ fun SettingsScreen(
                         },
                     )
                     SettingsDivider()
+                    val shareChooser = stringResource(R.string.chooser_share_app)
                     SettingsNavItem(
-                        title = "Share the App",
-                        description = "Tell your friends about AI Tube Navigator",
+                        title = stringResource(R.string.setting_share_app),
+                        description = stringResource(R.string.setting_share_app_desc),
                         icon = Icons.Filled.Share,
                         iconColor = TubePrimary,
                         value = "",
@@ -613,13 +631,15 @@ fun SettingsScreen(
                                 putExtra(Intent.EXTRA_SUBJECT, "AI Tube Navigator")
                                 putExtra(Intent.EXTRA_TEXT, text)
                             }
-                            runCatching { context.startActivity(Intent.createChooser(intent, "Share app")) }
+                            runCatching { context.startActivity(Intent.createChooser(intent, shareChooser)) }
                         },
                     )
                     SettingsDivider()
+                    val sendFeedbackChooser = stringResource(R.string.chooser_send_feedback)
+                    val noEmailMsg = stringResource(R.string.snack_no_email_app)
                     SettingsNavItem(
-                        title = "Send Feedback",
-                        description = "Ideas or general questions? Drop us a line",
+                        title = stringResource(R.string.setting_send_feedback),
+                        description = stringResource(R.string.setting_send_feedback_desc),
                         icon = Icons.Filled.Email,
                         iconColor = TubeSecondary,
                         value = "",
@@ -628,16 +648,17 @@ fun SettingsScreen(
                                 data = Uri.parse("mailto:londontubenavigator@gmail.com")
                                 putExtra(Intent.EXTRA_SUBJECT, "AI Tube Navigator feedback")
                             }
-                            runCatching { context.startActivity(Intent.createChooser(intent, "Send feedback")) }
+                            runCatching { context.startActivity(Intent.createChooser(intent, sendFeedbackChooser)) }
                                 .onFailure {
-                                    scope.launch { snackbarHostState.showSnackbar("No email app installed") }
+                                    scope.launch { snackbarHostState.showSnackbar(noEmailMsg) }
                                 }
                         },
                     )
                     SettingsDivider()
+                    val reportBugChooser = stringResource(R.string.chooser_report_bug)
                     SettingsNavItem(
-                        title = "Report a Bug",
-                        description = "Something not working? Let us know",
+                        title = stringResource(R.string.setting_report_bug),
+                        description = stringResource(R.string.setting_report_bug_desc),
                         icon = Icons.Filled.BugReport,
                         iconColor = StatusSevere,
                         value = "",
@@ -653,9 +674,9 @@ fun SettingsScreen(
                                 putExtra(Intent.EXTRA_SUBJECT, "AI Tube Navigator bug report")
                                 putExtra(Intent.EXTRA_TEXT, body)
                             }
-                            runCatching { context.startActivity(Intent.createChooser(intent, "Report a bug")) }
+                            runCatching { context.startActivity(Intent.createChooser(intent, reportBugChooser)) }
                                 .onFailure {
-                                    scope.launch { snackbarHostState.showSnackbar("No email app installed") }
+                                    scope.launch { snackbarHostState.showSnackbar(noEmailMsg) }
                                 }
                         },
                     )
@@ -665,12 +686,12 @@ fun SettingsScreen(
             // ═══════════════════════════════════════════════════
             // 8. PRIVACY & ABOUT
             // ═══════════════════════════════════════════════════
-            item { SectionTitle("Privacy & About") }
+            item { SectionTitle(stringResource(R.string.section_privacy_about)) }
             item {
                 SettingsCard {
                     SettingsNavItem(
-                        title = "Privacy Policy",
-                        description = "GDPR compliance & data handling",
+                        title = stringResource(R.string.setting_privacy_policy),
+                        description = stringResource(R.string.setting_privacy_policy_desc),
                         icon = Icons.Filled.PrivacyTip,
                         iconColor = TubeSecondary,
                         value = "",
@@ -678,8 +699,8 @@ fun SettingsScreen(
                     )
                     SettingsDivider()
                     SettingsNavItem(
-                        title = "Terms of Service",
-                        description = "Usage terms and conditions",
+                        title = stringResource(R.string.setting_terms),
+                        description = stringResource(R.string.setting_terms_desc),
                         icon = Icons.Filled.Code,
                         iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         value = "",
@@ -687,8 +708,8 @@ fun SettingsScreen(
                     )
                     SettingsDivider()
                     SettingsNavItem(
-                        title = "Open-Source Licences",
-                        description = "Third-party libraries used in this app",
+                        title = stringResource(R.string.setting_licenses),
+                        description = stringResource(R.string.setting_licenses_desc),
                         icon = Icons.Filled.Code,
                         iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         value = "",
@@ -705,9 +726,9 @@ fun SettingsScreen(
                             }
                             Spacer(modifier = Modifier.width(14.dp))
                             Column {
-                                Text("AI Tube Navigator v1.0.0", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                Text("Powered by TfL Open API · On-device AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                                Text("Unofficial · uses TfL Open Data · Not affiliated with TfL", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 10.sp)
+                                Text(stringResource(R.string.app_version_line), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.app_tagline), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                                Text(stringResource(R.string.app_disclaimer), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 10.sp)
                             }
                         }
                     }
@@ -721,12 +742,13 @@ fun SettingsScreen(
 
     // ── Delete All Data Confirmation Dialog ─────────────────
     if (showDeleteConfirm) {
+        val dataDeletedMsg = stringResource(R.string.snack_data_deleted)
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete all data?", fontWeight = FontWeight.Bold) },
+            title = { Text(stringResource(R.string.dialog_delete_all_title), fontWeight = FontWeight.Bold) },
             text = {
                 Text(
-                    "This will permanently erase all your preferences, saved journeys, and cached data. This cannot be undone.",
+                    stringResource(R.string.dialog_delete_all_message),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },
@@ -736,16 +758,16 @@ fun SettingsScreen(
                         showDeleteConfirm = false
                         scope.launch {
                             viewModel.deleteAllUserData()
-                            snackbarHostState.showSnackbar("All your data has been deleted")
+                            snackbarHostState.showSnackbar(dataDeletedMsg)
                         }
                     },
                 ) {
-                    Text("Delete", color = StatusSevere, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.action_delete), color = StatusSevere, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.action_cancel))
                 }
             },
         )
@@ -754,7 +776,7 @@ fun SettingsScreen(
     // ── Station Picker Bottom Sheet ────────────────────────
     if (showStationPicker) {
         StationPickerSheet(
-            title = if (stationPickerTarget == "home") "Select Home Station" else "Select Work Station",
+            title = if (stationPickerTarget == "home") stringResource(R.string.select_home_station) else stringResource(R.string.select_work_station),
             onDismiss = { showStationPicker = false },
             onStationSelected = { stationId ->
                 scope.launch {
@@ -765,6 +787,21 @@ fun SettingsScreen(
                     }
                 }
                 showStationPicker = false
+            },
+        )
+    }
+
+    if (showLanguagePicker) {
+        AppLanguageSheet(
+            selectedTag = prefs.appLanguageTag,
+            onDismiss = { showLanguagePicker = false },
+            onSelect = { tag ->
+                showLanguagePicker = false
+                scope.launch {
+                    viewModel.setAppLanguage(tag)
+                    AppLanguageManager.applyLanguage(tag)
+                    (context as? Activity)?.recreate()
+                }
             },
         )
     }
@@ -985,6 +1022,73 @@ private fun StationPickerSheet(
                             modifier = Modifier.size(16.dp),
                         )
                     }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.xl))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppLanguageSheet(
+    selectedTag: String?,
+    onDismiss: () -> Unit,
+    onSelect: (String?) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.xl),
+        ) {
+            Text(
+                text = stringResource(R.string.choose_app_language),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(vertical = Spacing.md),
+            )
+
+            AppLanguageManager.supportedLanguages.forEachIndexed { index, language ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(language.tag) }
+                        .padding(vertical = Spacing.md, horizontal = Spacing.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (language.tag == null) stringResource(R.string.follow_system) else language.nativeName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = language.englishName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp,
+                        )
+                    }
+                    if (selectedTag == language.tag) {
+                        Icon(
+                            imageVector = Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = TubePrimary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+                if (index < AppLanguageManager.supportedLanguages.lastIndex) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                 }
             }

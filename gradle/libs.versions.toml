@@ -4,6 +4,7 @@ kotlin = "2.0.21"
 ksp = "2.0.21-1.0.28"
 composeBom = "2024.11.00"
 hilt = "2.52"
+appcompat = "1.7.0"
 room = "2.6.1"
 retrofit = "2.11.0"
 okhttp = "4.12.0"
@@ -32,6 +33,7 @@ playReview = "2.0.1"
 # Core Android
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 
 # Compose BOM
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }

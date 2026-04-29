@@ -1,9 +1,9 @@
 package com.londontubeai.navigator
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -15,16 +15,18 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.londontubeai.navigator.data.network.NetworkMonitor
 import com.londontubeai.navigator.data.preferences.AppPreferences
+import com.londontubeai.navigator.localization.AppLanguageManager
 import com.londontubeai.navigator.navigation.AppNavigation
 import com.londontubeai.navigator.ui.appicon.AppIconManager
 import com.londontubeai.navigator.ui.theme.AiTubeNavigatorTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     @Inject lateinit var networkMonitor: NetworkMonitor
     @Inject lateinit var appPreferences: AppPreferences
@@ -37,6 +39,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
+        val savedLanguageTag = runBlocking { appPreferences.appLanguageTag.first() }
+        AppLanguageManager.applyLanguage(savedLanguageTag)
         enableEdgeToEdge()
 
         // Keep splash screen until we know whether to show onboarding

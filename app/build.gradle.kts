@@ -85,6 +85,7 @@ dependencies {
     // Core Android
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.appcompat)
 
     // Compose BOM
     implementation(platform(libs.compose.bom))

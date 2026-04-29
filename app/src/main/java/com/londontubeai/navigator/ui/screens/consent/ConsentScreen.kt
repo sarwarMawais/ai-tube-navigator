@@ -53,12 +53,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import com.londontubeai.navigator.R
 import com.londontubeai.navigator.data.analytics.AnalyticsTracker
 import com.londontubeai.navigator.data.preferences.AppPreferences
 import com.londontubeai.navigator.ui.components.SystemBarsEffect
@@ -156,15 +158,14 @@ fun ConsentScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Your Privacy Matters",
+                text = stringResource(R.string.consent_title),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Before you start, please choose what data you're happy to share. " +
-                    "You can change these any time in Settings → Privacy.",
+                text = stringResource(R.string.consent_intro),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White.copy(alpha = 0.75f),
                 lineHeight = 20.sp,
@@ -192,7 +193,7 @@ fun ConsentScreen(
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            "Always on",
+                            stringResource(R.string.consent_always_on),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold,
                             color = StatusGood,
@@ -200,8 +201,7 @@ fun ConsentScreen(
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "We use your location to find nearby stations, fetch live TfL data, " +
-                            "and store your preferences on your device. None of this is shared with us.",
+                        stringResource(R.string.consent_always_on_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.75f),
                         lineHeight = 18.sp,
@@ -214,9 +214,8 @@ fun ConsentScreen(
             // Optional consents
             ConsentToggle(
                 icon = Icons.Filled.Analytics,
-                title = "Anonymous usage analytics",
-                description = "Helps us understand which features people use so we can improve the app. " +
-                    "No personal data, no tracking across other apps.",
+                title = stringResource(R.string.consent_analytics),
+                description = stringResource(R.string.consent_analytics_desc),
                 checked = analyticsConsent,
                 onCheckedChange = { analyticsConsent = it },
             )
@@ -225,9 +224,8 @@ fun ConsentScreen(
 
             ConsentToggle(
                 icon = Icons.Filled.BugReport,
-                title = "Crash reports",
-                description = "Sends anonymous crash logs when the app stops working, so we can fix bugs faster. " +
-                    "No journey data is included.",
+                title = stringResource(R.string.consent_crash),
+                description = stringResource(R.string.consent_crash_desc),
                 checked = crashConsent,
                 onCheckedChange = { crashConsent = it },
             )
@@ -251,7 +249,7 @@ fun ConsentScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "Read our full privacy policy",
+                        stringResource(R.string.consent_read_policy),
                         style = MaterialTheme.typography.labelLarge,
                         color = Color.White,
                         modifier = Modifier.weight(1f),
@@ -277,7 +275,7 @@ fun ConsentScreen(
                 Icon(Icons.Filled.Check, null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    "Accept all",
+                    stringResource(R.string.consent_accept_all),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -295,7 +293,7 @@ fun ConsentScreen(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
             ) {
                 Text(
-                    "Save my choices",
+                    stringResource(R.string.consent_save_choices),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -310,7 +308,7 @@ fun ConsentScreen(
                 Icon(Icons.Filled.Close, null, modifier = Modifier.size(14.dp), tint = Color.White.copy(alpha = 0.7f))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    "Decline all (still use the app)",
+                    stringResource(R.string.consent_decline_all),
                     style = MaterialTheme.typography.labelLarge,
                     color = Color.White.copy(alpha = 0.7f),
                 )
@@ -319,7 +317,7 @@ fun ConsentScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                text = "We never sell your data. You can change your choices any time from Settings → Privacy.",
+                text = stringResource(R.string.consent_footer),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.White.copy(alpha = 0.5f),
                 textAlign = TextAlign.Center,
